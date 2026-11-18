@@ -44,7 +44,7 @@ a { color: inherit; }
 header { position: sticky; top: 0; z-index: 10; background: color-mix(in srgb, var(--bg) 85%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
 header .wrap { display: flex; align-items: center; justify-content: space-between; height: 60px; }
 .brand { display: flex; align-items: center; gap: 10px; font: 600 15px var(--mono); text-decoration: none; letter-spacing: -.01em; }
-.logo { display: block; height: 38px; width: auto; image-rendering: pixelated; }
+.logo { display: block; height: 44px; width: auto; }
 :root[data-theme="dark"] .logo { filter: invert(1); }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .logo { filter: invert(1); } }
 nav { display: flex; align-items: center; gap: 28px; }
@@ -209,7 +209,7 @@ details p { padding: 0 0 22px; color: var(--mute); }
 footer { padding: 72px 0 36px; overflow: hidden; }
 .foot { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; font-size: 13.5px; color: var(--mute); }
 .foot-brand { display: flex; align-items: center; gap: 12px; }
-.foot-brand .logo { height: 38px; }
+.foot-brand .logo { height: 32px; }
 .foot a { text-decoration: none; } .foot a:hover { color: var(--fg); }
 .foot nav { gap: 20px; }
 .theme { background: none; border: 1px solid var(--line); color: var(--mute); font: 500 12.5px var(--sans); padding: 5px 10px; cursor: pointer; }
@@ -226,7 +226,7 @@ footer { padding: 72px 0 36px; overflow: hidden; }
 <body>
 <header>
   <div class="wrap">
-    <a class="brand" href="#top" aria-label="pagurus, back to top"><img class="logo" src="assets/pagurus-mark.png" alt="pagurus" width="43" height="38"></a>
+    <a class="brand" href="#top" aria-label="pagurus, back to top"><img class="logo" src="assets/pagurus-mark.png" alt="pagurus" width="50" height="44"></a>
     <nav aria-label="Sections">
       <a class="opt" href="#features">Features</a>
       <a class="opt" href="#how">How it works</a>
@@ -241,7 +241,7 @@ footer { padding: 72px 0 36px; overflow: hidden; }
   <div class="hero">
     <div class="wrap">
       <div>
-        <img class="hero-logo" src="assets/pagurus-black.png" alt="The pagurus logo: a pixel-art hermit crab shell" width="249" height="219">
+        <img class="hero-logo" src="assets/pagurus-black.png" alt="The pagurus logo: a pixel-art shell" width="249" height="219">
         <span class="pill"><b>v0.1</b> First release · MCP, Discord, Slack and email</span>
         <h1>A tiny AI agent that <em>lives on your hardware.</em></h1>
         <p class="lede">pagurus remembers you, writes its own skills and looks after your machines. One file of about 3&nbsp;MB, on a laptop, a server or a $15 Raspberry Pi&nbsp;Zero.</p>
@@ -449,7 +449,7 @@ pagurus</pre><button class="copy" type="button">Copy</button></div></div></li>
         <details><summary>Can it break my system?</summary><p>Read-only commands run on their own. Anything that changes something needs your yes each time. It never runs as root and writes files only in its own workspace.</p></details>
         <details><summary>What isn't it?</summary><p>Not a coding agent, and it doesn't drive a browser or your desktop. Those are left out on purpose, to stay small. Anything else can come in through an MCP server.</p></details>
         <details><summary>What hardware does it need?</summary><p>Anything from a Raspberry Pi Zero W (512 MB) up. On a Raspberry Pi the running service uses about 6 MB of RAM.</p></details>
-        <details><summary>I used hermit before.</summary><p>pagurus is the same agent under a new name. It keeps using your <code>~/.hermit</code> folder and <code>HERMIT_*</code> settings until you move them to <code>~/.pagurus</code>.</p></details>
+        <details><summary>Does it need the internet?</summary><p>Only to reach your model provider and whatever you connect: chat apps, MCP servers, web search. With a local model in LM Studio or Ollama and the terminal, it runs fully offline.</p></details>
       </div>
     </div>
   </section>
@@ -458,7 +458,7 @@ pagurus</pre><button class="copy" type="button">Copy</button></div></div></li>
 <footer>
   <div class="wrap">
     <div class="foot">
-      <span class="foot-brand"><img class="logo" src="assets/pagurus-mark.png" alt="" width="43" height="38">pagurus · open source · MIT or Apache-2.0 · written in Rust</span>
+      <span class="foot-brand"><img class="logo" src="assets/pagurus-mark.png" alt="" width="36" height="32">pagurus · open source · MIT or Apache-2.0 · written in Rust</span>
       <nav><a href="https://github.com/0xjivinci/pagurus">GitHub</a><a href="https://github.com/0xjivinci/pagurus/releases">Downloads</a><button class="theme" id="theme" type="button">Light / dark</button></nav>
     </div>
     <div class="word" aria-hidden="true">pagurus</div>

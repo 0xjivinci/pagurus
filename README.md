@@ -121,10 +121,8 @@ and can be undone. Set `mode = "propose"` to approve each change yourself, or `o
 - **It writes only in its own workspace,** and saves a checkpoint before every edit (`/rollback`).
 - **What it is not.** Not a coding agent, and it doesn't drive a browser or your desktop. These are left out to keep
   it small. Add what you need through MCP.
-- **Maturity.** Version 0.1.0, the first release, with 141 tests. Discord, Slack, email, the task board, the swarm, ssh and the sandbox
-  are newer and have seen less real use. The Windows build has not been tried on a real Windows PC.
-- **Coming from hermit?** pagurus is the same agent under a new name. `~/.hermit` and `HERMIT_*` settings keep
-  working until a `~/.pagurus` exists.
+- **Maturity.** Version 0.1.0, the first release, with 141 tests. Discord, Slack, email, the task board, the swarm,
+  ssh and the sandbox have seen the least real use so far. The Windows build has not been tried on a real Windows PC.
 
 ## Documentation
 
@@ -149,7 +147,7 @@ own conversations. pagurus is an independent, much smaller take on that loop, wr
 with Nous Research. Its memory and skill files use the same format, so Hermes users can bring theirs over with
 `pagurus import`.
 
-The name is the hermit crab's genus: a small animal that carries its home and settles wherever it fits.
+The name comes from the genus of a small crab that carries its home and settles wherever it fits.
 
 ## License
 
