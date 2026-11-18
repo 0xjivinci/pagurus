@@ -1,0 +1,23 @@
+# systemd *user* unit for pagurus.
+#   mkdir -p ~/.config/systemd/user && cp pagurus.service ~/.config/systemd/user/
+#   printf 'PAGURUS_API_KEY=...\nPAGURUS_TELEGRAM_TOKEN=...\n' > ~/.pagurus/env && chmod 600 ~/.pagurus/env
+#   systemctl --user enable --now pagurus
+#   sudo loginctl enable-linger $USER      # keep it running when you're logged out
+#   journalctl --user -u pagurus -f
+
+[Unit]
+Description=pagurus personal agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/pagurus daemon
+EnvironmentFile=%h/.pagurus/env
+Restart=on-failure
+RestartSec=15
+Nice=10
+MemoryMax=64M
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

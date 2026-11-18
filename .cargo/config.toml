@@ -1,0 +1,5 @@
+# The Pi Zero W / Pi 1 is ARMv6 + VFPv2. C code (ring's crypto) must be told so,
+# otherwise cross compilers default to ARMv7 and the binary dies with SIGILL there.
+[env]
+CFLAGS_arm_unknown_linux_musleabihf = "-march=armv6zk -mfpu=vfp -mfloat-abi=hard"
+CFLAGS_arm_unknown_linux_gnueabihf = "-march=armv6zk -mfpu=vfp -mfloat-abi=hard"

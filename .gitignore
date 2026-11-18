@@ -1,0 +1,12 @@
+target/
+target-linux/
+target-armv6/
+dist/
+core
+*.core
+target-x/
+target-win/
+.DS_Store
+target-mac/
+.claude/
+/target-full

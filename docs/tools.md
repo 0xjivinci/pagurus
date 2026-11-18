@@ -1,0 +1,98 @@
+# Tools, MCP and other machines
+
+[← back to the README](../README.md)
+
+## What it can do
+
+| Tool | Notes |
+|---|---|
+| `shell` | Read-only commands run directly: `ps df free uptime journalctl cat grep ip ss vcgencmd systemctl status/show/list-units …`, also joined with `\|`, `&&`, `\|\|`. **Anything else asks you first** (`/yes` on Telegram, y/N in the terminal). Unattended runs refuse it. pagurus never has root. |
+| `read_file` · `list_dir` · `write_file` | Reads anywhere **except files that look like secrets** (`~/.ssh`, keys, tokens, `.env`, its own `env` file). Writes only in `~/.pagurus/workspace`. |
+| `edit_file` | Replaces one snippet in a file (exact, or ignoring whitespace/quote differences when that is still unique). Every write and edit first saves a checkpoint: `/rollback` lists the last 30 and puts a file back. |
+| `process` | Long-running commands in the background (a build, `journalctl -f`): **always asks you first**, at most 3 at once, each stopped after 60 min (max 24 h). It reads their output later, and you get a message when one ends. |
+| `clarify` | Asks you one short question, with choices as buttons on Telegram, and waits (10 min). Unattended runs can't ask. |
+| `web_search` | Searches the web and returns titles, links and snippets; pagurus then reads the best pages and names its sources. DuckDuckGo needs no account; set `BRAVE_API_KEY` or `TAVILY_API_KEY` in the env file, or `[search] searxng_url`, for a steadier engine. |
+| `web_fetch` | Reads one URL as text, including local dashboards (`http://127.0.0.1:3000`), and lists the data URLs a page's scripts load. No browser, no downloads. `tools.web = false` turns web search and fetch off. |
+| `view_image` | Looks at an image file on the machine (a screenshot, a camera snapshot). Photos you send on Telegram reach the model automatically. Needs a vision model. |
+| `send_file` | Sends you a photo or file in your chat app (screenshots, logs): Telegram, Discord or Slack. |
+| `heartbeat` | Repeating checks, daily/weekly tasks, one-off reminders: see [Monitoring](monitoring.md). |
+| `delegate` | Hands a self-contained job to a sub-agent with a fresh context. Only its report comes back. |
+| `todo` | A plan for multi-step jobs that stays in view while it works. |
+| `session_search` | Searches your past conversations, best matches first, each with the messages around it; by date (`7d`, `2026-06-01`) and channel. |
+| `memory` · `skill_propose` · `skill_view` | Its long-term memory and skills: see [Learning](learning.md). |
+| `mcp_<server>_<tool>` | Tools from MCP servers you connect: see [MCP](#mcp). Each call asks you first unless you mark the tool read-only. |
+
+Long tool output (big logs, long pages) isn't cut off: the start and end are shown and the whole text is saved under
+`workspace/.tool-output/` for `read_file` to page through.
+
+Whatever a tool returns is sent to your model provider. That's why secret files are never read, and commands that
+mention them always need your approval.
+
+## MCP
+
+pagurus can use tools from [MCP](https://modelcontextprotocol.io) servers: local ones it starts (stdio) and remote
+ones (Streamable HTTP). Add them to `config.toml`:
+
+```toml
+[[mcp]]
+name = "fs"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "/home/pi/notes"]
+read_only = ["read_*", "list_*", "search_files"]   # these run without asking
+
+[[mcp]]
+name = "web"
+url = "https://example.com/mcp"
+bearer_env = "EXAMPLE_MCP_TOKEN"   # the env var holding the token, e.g. in ~/.pagurus/env
+```
+
+- Tools show up as `mcp_<name>_<tool>`. `allow` / `deny` (names or `*` globs) pick which ones the model sees.
+- **Every call asks you first** (y/N, or `/yes` on Telegram) unless the tool is in `read_only`; unattended runs
+  refuse. `approve = "writes"` also trusts the server's own read-only marking, `approve = "never"` never asks.
+- A stdio server gets a clean environment: `PATH`, `HOME`, `LANG` and the like, plus only the variables you list in
+  `env = ["NAME", …]`. Your API keys are not passed on.
+- Servers start with the first message (up to 30 s), stay running, and stop with pagurus. One that crashed is
+  restarted on its next call; one that won't start is retried later. Calls time out after `timeout_secs` (60).
+- `pagurus mcp list` shows each server and its tools, `pagurus mcp test <name> [tool '{"arg":…}']` tries one.
+- Not supported: OAuth sign-in (use a token), servers asking the agent's model or you for something (sampling,
+  elicitation), resources and prompts.
+
+## Other machines and a sandbox
+
+pagurus can run commands on your other machines over `ssh`, and in a throwaway Docker container. It uses the system
+`ssh` and `docker` programs (no extra code in the binary) and keeps the same rules as at home: read-only commands
+run directly, anything else waits for your approval, and the approval says where it will run.
+
+```toml
+[[host]]
+name = "nas"                       # the model can only pick names listed here
+target = "admin@nas.local"         # or an alias from ~/.ssh/config
+# port = 2222
+# identity_file = "~/.ssh/id_ed25519_pagurus"   # a path, never the key itself
+# shell_allow = ["uptime", "df", "zpool status"] # read-only commands for this host (default: tools.shell_allow)
+# approve = "always"               # ask before every command (default "writes": read-only ones run unasked)
+# host_key_check = "yes"           # default "accept-new": trust a new host once, refuse a changed key
+
+[sandbox]
+docker_image = "python:3.12-slim"  # leave out = no sandbox
+network = false                    # on: the container can reach the network (then commands are asked by default)
+memory = "512m"
+cpus = "1"
+mounts = ["/srv/data:/data"]       # extra folders, always read-only; the workspace is /workspace (read-write)
+# approve = "ask"                  # default "auto" when network is off: sandboxed commands run without asking
+# route_writes = true              # commands that would need approval here run in the sandbox instead
+# as_root = true                   # e.g. to apt-get install (default: your user, so files stay yours)
+```
+
+Then just ask: "how full are the disks on the nas?" runs `df -h` there. `pagurus host list` shows the hosts,
+`pagurus host test nas` tries the connection, and `pagurus doctor` says whether ssh and docker are usable.
+
+- ssh runs with `BatchMode` (keys or an ssh agent; no password prompts), a connect timeout, and a shared
+  connection (`ControlPersist`) so repeated commands are fast. Set up the key once yourself (`ssh-copy-id`).
+- Neither ssh nor docker sees the agent's environment (your API keys); ssh gets only `SSH_AUTH_SOCK` on top of the
+  basics. Output is capped and redacted like local commands, and a timeout kills the command.
+- The sandbox is a fresh `docker run --rm` per command: no network by default, all capabilities dropped except file
+  ownership, no privilege gain, memory/CPU/process limits, and nothing of this machine but the workspace and your
+  read-only mounts. Packages installed in one command are gone in the next; keep what should last in /workspace.
+- A remote command is checked as text (pagurus can't see the other machine's files), so wildcards that could reach
+  hidden files and recursive searches of home directories need your approval there.
