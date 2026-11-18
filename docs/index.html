@@ -62,10 +62,13 @@ nav a.btn { color: var(--bg); }
 .hero { position: relative; padding: 96px 0 88px; border-bottom: 1px solid var(--line); overflow: hidden; }
 .hero::before { content: ""; position: absolute; inset: 0; background-image: radial-gradient(var(--line-2) 1px, transparent 1px); background-size: 22px 22px; mask-image: radial-gradient(ellipse 70% 80% at 70% 40%, #000 30%, transparent 75%); -webkit-mask-image: radial-gradient(ellipse 70% 80% at 70% 40%, #000 30%, transparent 75%); opacity: .7; }
 .hero .wrap { position: relative; display: grid; grid-template-columns: 1fr 1.05fr; gap: 56px; align-items: center; }
-.hero-logo { display: block; width: 249px; height: auto; image-rendering: pixelated; margin: 0 0 36px -4px; }
-:root[data-theme="dark"] .hero-logo { filter: invert(1); }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .hero-logo { filter: invert(1); } }
+.hero-logo { display: block; width: 249px; height: auto; margin: 0 0 36px -4px; }
 @media (max-width: 560px) { .hero-logo { width: 187px; margin-bottom: 28px; } }
+.brand-mark { display: block; height: 40px; width: auto; }
+.on-dark { display: none !important; }
+:root[data-theme="dark"] .on-light { display: none !important; }
+:root[data-theme="dark"] .on-dark { display: block !important; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .on-light { display: none !important; } :root:not([data-theme="light"]) .on-dark { display: block !important; } }
 .pill { display: inline-flex; align-items: center; gap: 10px; padding: 5px 12px 5px 6px; border: 1px solid var(--line-2); font: 500 12.5px var(--mono); color: var(--mute); background: var(--bg); }
 .pill b { background: var(--fg); color: var(--bg); padding: 2px 7px; font-weight: 600; }
 h1 { margin-top: 24px; font-size: clamp(36px, 4.6vw, 56px); line-height: 1.04; font-weight: 700; letter-spacing: -.035em; }
@@ -226,7 +229,7 @@ footer { padding: 72px 0 36px; overflow: hidden; }
 <body>
 <header>
   <div class="wrap">
-    <a class="brand" href="#top" aria-label="pagurus, back to top"><img class="logo" src="assets/pagurus-mark.png" alt="pagurus" width="50" height="44"></a>
+    <a class="brand" href="#top" aria-label="pagurus, back to top"><img class="brand-mark on-light" src="assets/pagurus-header-light.svg" alt="pagurus" width="171" height="40"><img class="brand-mark on-dark" src="assets/pagurus-header-dark.svg" alt="pagurus" width="174" height="40"></a>
     <nav aria-label="Sections">
       <a class="opt" href="#features">Features</a>
       <a class="opt" href="#how">How it works</a>
@@ -241,7 +244,8 @@ footer { padding: 72px 0 36px; overflow: hidden; }
   <div class="hero">
     <div class="wrap">
       <div>
-        <img class="hero-logo" src="assets/pagurus-black.png" alt="The pagurus logo: a pixel-art shell" width="249" height="219">
+        <img class="hero-logo on-light" src="assets/pagurus-lockup-light.svg" alt="pagurus" width="249" height="285">
+        <img class="hero-logo on-dark" src="assets/pagurus-lockup-dark.svg" alt="pagurus" width="249" height="290">
         <span class="pill"><b>v0.1</b> First release · MCP, Discord, Slack and email</span>
         <h1>A tiny AI agent that <em>lives on your hardware.</em></h1>
         <p class="lede">pagurus remembers you, writes its own skills and looks after your machines. One file of about 3&nbsp;MB, on a laptop, a server or a $15 Raspberry Pi&nbsp;Zero.</p>

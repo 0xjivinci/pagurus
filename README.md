@@ -1,11 +1,9 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/pagurus-white.png">
-    <img src="assets/pagurus-black.png" alt="pagurus" width="249">
+    <source media="(prefers-color-scheme: dark)" srcset="assets/pagurus-lockup-dark.svg">
+    <img src="assets/pagurus-lockup-light.svg" alt="pagurus" width="200">
   </picture>
 </p>
-
-<h1 align="center">pagurus</h1>
 
 <p align="center"><b>A small, self-improving personal agent.</b><br>
 The learning loop of Hermes Agent, in one Rust binary of about 3 MB.</p>
