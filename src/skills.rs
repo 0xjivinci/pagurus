@@ -121,7 +121,7 @@ pub fn auto_retire(home: &Path) -> Vec<String> {
 
 /// Short label for the prompt's skill list, from its track record.
 pub fn tag(home: &Path, name: &str, u: Option<&Usage>) -> &'static str {
-    let bundled = crate::bundled::SKILLS.iter().any(|(n, _)| *n == name);
+    let bundled = crate::bundled::SKILLS.iter().chain(crate::bundled::EXTRA).any(|(n, _)| *n == name);
     match u {
         Some(u) if u.streak >= 2 => "failed the last 2+ times — read it critically and fix it",
         Some(u) if u.streak == 1 => "failed last time — check its steps",

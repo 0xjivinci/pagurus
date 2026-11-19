@@ -136,6 +136,7 @@ and can be undone. Set `mode = "propose"` to approve each change yourself, or `o
 | [Run it as a service](docs/service.md) | systemd and launchd, Raspberry Pi notes |
 | [Configuration](docs/configuration.md) | Settings and the files in `~/.pagurus` |
 | [Development](docs/development.md) | Tests, cross-builds, the Pi Zero check |
+| [Crypto art](docs/art.md) | *uge build:* research Tezos art for collectors and artists, red flags, zero-token alerts |
 
 ## Credits
 

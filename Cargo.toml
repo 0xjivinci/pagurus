@@ -27,8 +27,12 @@ rusqlite = { version = "0.32", default-features = false, features = ["bundled"],
 # The small build ("pagurus"): a tiny built-in index for session_search.
 default = []
 sqlite = ["dep:rusqlite"]
-# "pagurus full": every optional feature. Other features join this list.
-full = ["sqlite"]
+# Crypto-art research for collectors and artists (Tezos via objkt; read-only).
+art = []
+# "uge": the big build for laptops and servers: every optional feature.
+uge = ["sqlite", "art"]
+# The older name for the big build.
+full = ["uge"]
 
 [profile.release]
 opt-level = "z"

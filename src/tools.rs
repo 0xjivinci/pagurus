@@ -242,6 +242,8 @@ pub fn definitions(cfg: &Config, set: Set) -> Value {
                     "count":{"type":"integer","description":"results, 1-10 (default 6)"}},
                   "required":["query"]}),
             ));
+            #[cfg(feature = "art")]
+            v.push(crate::art::tool_definition());
         }
         v.push(def(
             "session_search",
@@ -306,7 +308,7 @@ pub fn parallel_safe(ctx: &Ctx, name: &str, raw: &str) -> bool {
     let a: Value = serde_json::from_str(raw).unwrap_or_default();
     match name {
         "read_file" | "list_dir" | "session_search" | "skill_view" => true,
-        "web_fetch" | "web_search" => ctx.cfg.tools.web,
+        "web_fetch" | "web_search" | "art" => ctx.cfg.tools.web,
         "shell" => {
             ctx.cfg.tools.shell != "off"
                 && a.get("host").is_none()
@@ -391,6 +393,7 @@ fn outside_text(ctx: &Ctx, name: &str, a: &Value) -> Option<String> {
     match name {
         "web_fetch" => Some(format!("web page {}", arg("url"))),
         "web_search" => Some(format!("web search \"{}\"", arg("query"))),
+        "art" => Some("art data from objkt".to_string()),
         "view_image" => Some(format!("image {}", arg("path"))),
         n if n.starts_with("mcp_") => Some(format!("MCP tool {n}")),
         "ask_peer" => Some(format!("peer {}", arg("peer"))),
@@ -508,6 +511,8 @@ fn dispatch(ctx: &Ctx, name: &str, a: &Value) -> Result<String, String> {
             x => Err(format!("unknown action `{x}`")),
         },
         "web_fetch" if ctx.cfg.tools.web => web_fetch(&s(a, "url")?),
+        #[cfg(feature = "art")]
+        "art" if ctx.cfg.tools.web => crate::art::run_tool(a),
         "web_search" if ctx.cfg.tools.web => crate::search::search(&ctx.cfg.search, &s(a, "query")?, a["count"].as_u64().map(|c| c as usize)),
         "delegate" => {
             let mut tasks: Vec<String> = a["tasks"].as_array().map(|t| t.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default();
@@ -1908,6 +1913,8 @@ mod defsize {
         cfg.tools.web = true;
         cfg.tools.shell = "ask".into();
         let total: usize = super::definitions(&cfg, super::Set::Full).as_array().unwrap().iter().map(|d| d.to_string().len()).sum();
-        assert!(total <= 12_000, "tool definitions grew to {total} chars");
+        // the uge build adds its own tools (art: ~0.6k) on top of the small build's budget
+        let budget = if cfg!(feature = "art") { 12_700 } else { 12_000 };
+        assert!(total <= budget, "tool definitions grew to {total} chars");
     }
 }

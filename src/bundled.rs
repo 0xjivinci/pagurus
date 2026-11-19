@@ -15,10 +15,19 @@ pub const SKILLS: &[(&str, &str)] = &[
     ("screenshot", include_str!("../skills-bundled/screenshot/SKILL.md")),
 ];
 
+/// Skills that need an optional feature (the uge build).
+#[cfg(feature = "art")]
+pub const EXTRA: &[(&str, &str)] = &[
+    ("art-collector", include_str!("../skills-bundled/art-collector/SKILL.md")),
+    ("art-artist", include_str!("../skills-bundled/art-artist/SKILL.md")),
+];
+#[cfg(not(feature = "art"))]
+pub const EXTRA: &[(&str, &str)] = &[];
+
 /// Returns (installed, kept) names.
 pub fn install(home: &Path) -> Result<(Vec<String>, Vec<String>), String> {
     let (mut installed, mut kept) = (Vec::new(), Vec::new());
-    for (name, body) in SKILLS {
+    for (name, body) in SKILLS.iter().chain(EXTRA) {
         let p = home.join("skills").join(name).join("SKILL.md");
         if p.exists() || crate::skills::is_archived(home, name) {
             kept.push(name.to_string());
@@ -34,18 +43,19 @@ pub fn install(home: &Path) -> Result<(Vec<String>, Vec<String>), String> {
 mod tests {
     #[test]
     fn bundled_skills_are_well_formed_and_small() {
-        for (name, body) in super::SKILLS {
+        for (name, body) in super::SKILLS.iter().chain(super::EXTRA) {
             crate::learn::valid_name(name).unwrap();
             assert!(body.starts_with(&format!("---\nname: {name}\ndescription: ")), "{name} frontmatter");
             assert!(body.len() < 3000, "{name} is {} bytes; keep skills short", body.len());
         }
         let home = std::env::temp_dir().join(format!("pagurus-bundled-{}", crate::util::new_id()));
+        let all = super::SKILLS.len() + super::EXTRA.len();
         let (inst, kept) = super::install(&home).unwrap();
-        assert_eq!((inst.len(), kept.len()), (super::SKILLS.len(), 0));
+        assert_eq!((inst.len(), kept.len()), (all, 0));
         std::fs::write(home.join("skills/pi-health/SKILL.md"), "mine").unwrap();
         let (inst, kept) = super::install(&home).unwrap();
-        assert_eq!((inst.len(), kept.len()), (0, super::SKILLS.len()));
+        assert_eq!((inst.len(), kept.len()), (0, all));
         assert_eq!(std::fs::read_to_string(home.join("skills/pi-health/SKILL.md")).unwrap(), "mine");
-        assert_eq!(crate::tools::skill_index(&home).len(), super::SKILLS.len());
+        assert_eq!(crate::tools::skill_index(&home).len(), all);
     }
 }

@@ -10,3 +10,5 @@ target-win/
 target-mac/
 .claude/
 /target-full
+/target-uge
+/target-uge2

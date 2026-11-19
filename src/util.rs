@@ -290,6 +290,14 @@ pub fn cancelled() -> bool {
     CANCEL.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+/// UTC as ISO 8601, e.g. `2026-11-19T03:30:55Z` (for APIs).
+#[allow(dead_code)] // used by optional features
+pub fn fmt_utc_iso(secs: u64) -> String {
+    let (y, m, d) = civil((secs / 86_400) as i64);
+    let t = secs % 86_400;
+    format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z", t / 3600, (t % 3600) / 60, t % 60)
+}
+
 /// Local wall-clock time with its UTC offset, e.g. `2026-11-15 09:30 +01:00`.
 pub fn fmt_time(secs: u64) -> String {
     let off = utc_offset();

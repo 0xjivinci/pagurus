@@ -1,4 +1,6 @@
 mod agent;
+#[cfg(feature = "art")]
+mod art;
 mod ask;
 mod board;
 mod bundled;
@@ -75,6 +77,8 @@ fn run(args: &[String]) -> Result<(), String> {
         "init" => init(&home),
         "setup" => setup::run(&home),
         "eval" => eval::run(&home, &args[1..]),
+        #[cfg(feature = "art")]
+        "art" => art::cli(&args[1..]).map(|out| println!("{}", out.trim_end())),
         "service" => setup::service_cmd(&home, &args[1..]),
         "model" => {
             let (msg, _) = config::model_command(&home, &config::load(&home)?, &args[1..].join(" "))?;
