@@ -367,9 +367,17 @@ impl Llm {
                     }
                 }
                 Err(e) => {
+                    let msg = e.to_string();
+                    // a kept-alive connection the server closed while we were idle (a local
+                    // model server between two messages): the request never got there, so
+                    // try once more on a fresh connection instead of benching the model
+                    if attempt == 0 && stale_connection(&msg) {
+                        last = msg;
+                        continue;
+                    }
                     // network trouble or a timeout: retrying the same model wastes the
                     // time a fallback could use
-                    return Err(Fail { msg: e.to_string(), fatal: false, cool: 120 });
+                    return Err(Fail { msg, fatal: false, cool: 120 });
                 }
             }
         }
@@ -424,6 +432,15 @@ fn usage_note(v: &Value) -> Option<String> {
     Some(s)
 }
 
+/// Errors that mean the connection was already dead before our request was sent.
+fn stale_connection(msg: &str) -> bool {
+    let m = msg.to_lowercase();
+    ["connection reset", "reset by peer", "broken pipe", "connection closed", "connection aborted", "unexpected eof"]
+        .iter()
+        .any(|s| m.contains(s))
+        && !m.contains("timed out")
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -445,6 +462,14 @@ mod tests {
         assert_eq!(w["content"][1]["image_url"]["url"], "data:image/png;base64,AAAA");
         let stored = serde_json::to_string(&m).unwrap();
         assert!(!stored.contains("base64"), "{stored}");
+    }
+
+    #[test]
+    fn a_dead_kept_alive_connection_is_retried_not_benched() {
+        assert!(super::stale_connection("Network Error: Connection reset by peer (os error 54)"));
+        assert!(super::stale_connection("Broken pipe (os error 32)"));
+        assert!(!super::stale_connection("Network Error: timed out reading response"));
+        assert!(!super::stale_connection("Dns Failed: no such host"));
     }
 
     #[test]
