@@ -512,7 +512,7 @@ fn dispatch(ctx: &Ctx, name: &str, a: &Value) -> Result<String, String> {
         },
         "web_fetch" if ctx.cfg.tools.web => web_fetch(&s(a, "url")?),
         #[cfg(feature = "art")]
-        "art" if ctx.cfg.tools.web => crate::art::run_tool(a),
+        "art" if ctx.cfg.tools.web => crate::art::run_tool(ctx.home, a),
         "web_search" if ctx.cfg.tools.web => crate::search::search(&ctx.cfg.search, &s(a, "query")?, a["count"].as_u64().map(|c| c as usize)),
         "delegate" => {
             let mut tasks: Vec<String> = a["tasks"].as_array().map(|t| t.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default();
@@ -734,6 +734,11 @@ fn process(ctx: &Ctx, a: &Value) -> Result<String, String> {
 
 /// Run a heartbeat check's command: read-only commands only, short timeout.
 pub fn run_check(home: &Path, cfg: &Config, cmd: &str) -> Result<String, String> {
+    // art watches run in-process: read-only, no shell, no PATH lookup
+    #[cfg(feature = "art")]
+    if let Some(out) = crate::art::check(cmd) {
+        return out;
+    }
     if let Some(why) = needs_approval(home, &cfg.tools.shell_allow, cmd) {
         return Err(format!("check not run: {why}"));
     }
@@ -1913,8 +1918,8 @@ mod defsize {
         cfg.tools.web = true;
         cfg.tools.shell = "ask".into();
         let total: usize = super::definitions(&cfg, super::Set::Full).as_array().unwrap().iter().map(|d| d.to_string().len()).sum();
-        // the uge build adds its own tools (art: ~0.6k) on top of the small build's budget
-        let budget = if cfg!(feature = "art") { 12_700 } else { 12_000 };
+        // the uge build adds its own tools (art with watches: ~0.8k) on top of the small build's budget
+        let budget = if cfg!(feature = "art") { 12_900 } else { 12_000 };
         assert!(total <= budget, "tool definitions grew to {total} chars");
     }
 }

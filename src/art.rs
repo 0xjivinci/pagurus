@@ -484,28 +484,72 @@ pub fn tool_definition() -> Value {
         "name": "art",
         "description": "Read-only crypto-art research (Tezos/objkt): artists, works, sales, royalties, collectors, a wallet's \
             collection, and checks before buying (provenance, edition, red flags). Never buys; give the objkt link. Not \
-            financial advice. Alerts: heartbeat check `pagurus art new|sold <artist> <min>` or `pagurus art ask <piece>`.",
+            financial advice. action=watch sets a free alert: kind new|sold (who) or ask (piece, below).",
         "parameters": { "type": "object", "properties": {
-            "action": { "type": "string", "enum": ["artist", "works", "piece", "sales", "collectors", "holdings"] },
+            "action": { "type": "string", "enum": ["artist", "works", "piece", "sales", "collectors", "holdings", "watch"] },
             "who": { "type": "string", "description": "tz… address, .tez name or objkt username" },
             "piece": { "type": "string", "description": "objkt link or KT1…/id" },
+            "kind": { "type": "string", "enum": ["new", "sold", "ask"] },
+            "below": { "type": "number", "description": "watch kind=ask: alert under this many tez" },
+            "every_minutes": { "type": "integer", "description": "watch: how often (default 30)" },
             "days": { "type": "integer", "description": "sales window (default 30)" },
             "limit": { "type": "integer" }
-        }, "required": ["action"] }
+        } }
     }})
 }
 
-pub fn run_tool(a: &Value) -> Result<String, String> {
+pub fn run_tool(home: &std::path::Path, a: &Value) -> Result<String, String> {
     let who = a["who"].as_str().unwrap_or("");
+    let piece_arg = a["piece"].as_str().unwrap_or("");
     let n = a["limit"].as_u64().unwrap_or(10) as usize;
-    match a["action"].as_str().unwrap_or("") {
+    // models sometimes leave out `action`: infer it from what they did pass
+    let action = match a["action"].as_str().unwrap_or("") {
+        "" if a["kind"].is_string() => "watch",
+        "" if !piece_arg.is_empty() || parse_piece(who).is_some() => "piece",
+        "" if !who.is_empty() => "artist",
+        x => x,
+    };
+    match action {
         "artist" => artist(who, n),
         "works" => works(who, n),
-        "piece" => piece(a["piece"].as_str().or(a["who"].as_str()).unwrap_or("")),
+        "piece" => piece(if piece_arg.is_empty() { who } else { piece_arg }),
         "sales" => sales(who, a["days"].as_u64().unwrap_or(30)),
         "collectors" => collectors(who, n),
         "holdings" => holdings(who, n),
+        "watch" => watch(home, a["kind"].as_str().unwrap_or(""), who, piece_arg, a["below"].as_f64(), a["every_minutes"].as_u64().unwrap_or(30)),
+        "" => Err("say what to look up: action=artist, works, piece, sales, collectors, holdings or watch".into()),
         other => Err(format!("unknown art action `{other}`")),
+    }
+}
+
+/// Write a correct zero-token check into HEARTBEAT.md: the look-back window equals
+/// the interval, so nothing falls between two runs.
+pub fn watch(home: &std::path::Path, kind: &str, who: &str, piece_spec: &str, below: Option<f64>, every: u64) -> Result<String, String> {
+    let every = every.clamp(5, 24 * 60);
+    let line = match kind {
+        "new" | "sold" => {
+            let w = resolve(who)?;
+            let what = if kind == "new" { format!("new work by {}", w.label()) } else { format!("a sale of {}'s work", w.label()) };
+            format!("`pagurus art {kind} {} {every}` > 0 {what}", w.address)
+        }
+        "ask" => {
+            let (c, id) = parse_piece(if piece_spec.is_empty() { who } else { piece_spec }).ok_or("watch kind=ask needs the piece (objkt link or KT1…/id)")?;
+            let below = below.filter(|b| *b > 0.0).ok_or("watch kind=ask needs `below`: the price in tez")?;
+            format!("`pagurus art ask {c}/{id}` < {below} {} listed under {below} ꜩ", piece_url(&c, &id))
+        }
+        _ => return Err("watch needs kind: new, sold or ask".into()),
+    };
+    let added = crate::tasks::add(home, &line, Some(every), None, None)?;
+    Ok(format!("{added}\nIt runs every {every} min without the model and messages the user once when it triggers (the daemon must be running)."))
+}
+
+/// A heartbeat check command for art, run in-process. None if `cmd` isn't one.
+pub fn check(cmd: &str) -> Option<Result<String, String>> {
+    let rest = cmd.trim().strip_prefix("pagurus art ")?;
+    let args: Vec<String> = rest.split_whitespace().map(String::from).collect();
+    match args.first().map(String::as_str) {
+        Some("new" | "sold" | "ask") => Some(cli(&args)),
+        _ => Some(Err("only `pagurus art new|sold|ask` can run as a check".into())),
     }
 }
 
@@ -558,6 +602,25 @@ mod tests {
         assert_eq!(parse_piece("KT1LnP9xJM1Y5mnCvXnwpUQzTi3z5yYcwhu7 182"), want);
         assert_eq!(parse_piece("https://objkt.com/tokens/KT1LnP9xJM1Y5mnCvXnwpUQzTi3z5yYcwhu7/abc"), None);
         assert_eq!(parse_piece("no piece here"), None);
+    }
+
+    #[test]
+    fn checks_run_in_process_and_watches_are_well_formed() {
+        assert!(check("df -h /").is_none());
+        assert!(check("pagurus art holdings x").unwrap().is_err(), "only number commands may run as checks");
+        assert!(check("pagurus art ask nothing-here").unwrap().is_err());
+        let home = std::env::temp_dir().join(format!("pagurus-art-{}", crate::util::new_id()));
+        std::fs::create_dir_all(&home).unwrap();
+        let out = watch(&home, "ask", "", "https://objkt.com/tokens/KT1LnP9xJM1Y5mnCvXnwpUQzTi3z5yYcwhu7/182", Some(5.0), 30).unwrap();
+        assert!(out.contains("every 30 min"), "{out}");
+        let hb = std::fs::read_to_string(home.join("HEARTBEAT.md")).unwrap();
+        let line = hb.lines().find(|l| l.contains("pagurus art ask")).expect("watch line written");
+        let task = crate::tasks::parse_line(line).expect("parses as a task");
+        let c = crate::tasks::parse_check(&task.text).expect("is a zero-token check");
+        assert_eq!((c.op.as_str(), c.limit), ("<", 5.0));
+        assert!(c.cmd.starts_with("pagurus art ask KT1LnP9xJM1Y5mnCvXnwpUQzTi3z5yYcwhu7/182"));
+        assert!(watch(&home, "ask", "", "KT1LnP9xJM1Y5mnCvXnwpUQzTi3z5yYcwhu7/182", None, 30).is_err(), "needs a price");
+        assert!(watch(&home, "fly", "x", "", None, 30).is_err());
     }
 
     #[test]
