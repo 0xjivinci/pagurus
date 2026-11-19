@@ -11,6 +11,7 @@ act, it gives you the objkt link and you do it in your own wallet. Nothing it sa
 
 ## Ask in plain words
 
+- "Which Tezos artists should I look at?"
 - "Tell me about the artist oinky.tez"
 - "Is this a safe buy? https://objkt.com/tokens/KT1…/182"
 - "Who collects my work?" (after telling it your address)
@@ -35,6 +36,7 @@ No red flags means nothing obvious showed up, not that a piece is safe.
 ## Commands
 
 ```sh
+pagurus art trending [days] [n]       # artists selling to the most different collectors lately
 pagurus art artist <who> [n]          # profile, recent works, sales of the last 90 days
 pagurus art works <who> [n]           # works, newest first
 pagurus art sales <who> [days]        # primary and secondary sales, royalties estimate

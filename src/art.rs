@@ -453,6 +453,83 @@ pub fn collectors(who: &str, n: usize) -> Result<String, String> {
     Ok(out)
 }
 
+const TREND_Q: &str = "query($since: timestamptz!, $off: Int!) { listing_sale(where: {timestamp: {_gte: $since}}, \
+    order_by: {timestamp: desc}, limit: 500, offset: $off) { price_xtz buyer_address seller_address \
+    token { creators { creator_address holder { alias tzdomain flag flag_reason } } } } }";
+
+/// Artists whose work sold to the most different collectors lately (then by volume).
+/// Distinct buyers first, so a few wallets trading among themselves can't push anyone up.
+pub fn trending(days: u64, n: usize) -> Result<String, String> {
+    let days = days.clamp(1, 30);
+    let from = since(days * 24 * 60);
+    let mut rows = Vec::new();
+    for page in 0..4 {
+        let batch = gql(TREND_Q, json!({ "since": from, "off": page * 500 }))?["listing_sale"].as_array().cloned().unwrap_or_default();
+        let last = batch.len() < 500;
+        rows.extend(batch);
+        if last {
+            break;
+        }
+    }
+    struct Stat {
+        label: String,
+        sales: usize,
+        secondary: usize,
+        volume: i64,
+        buyers: std::collections::HashSet<String>,
+    }
+    let mut by: HashMap<String, Stat> = HashMap::new();
+    for r in &rows {
+        let Some(cr) = r["token"]["creators"].get(0) else { continue };
+        let Some(a) = cr["creator_address"].as_str() else { continue };
+        if a == BURN || !flag_of(&cr["holder"]).is_empty() {
+            continue; // flagged accounts never show up as suggestions
+        }
+        let e = by.entry(a.to_string()).or_insert_with(|| Stat {
+            label: holder_label(&cr["holder"], a),
+            sales: 0,
+            secondary: 0,
+            volume: 0,
+            buyers: Default::default(),
+        });
+        e.sales += 1;
+        e.volume += num(&r["price_xtz"]).unwrap_or(0);
+        if let Some(b) = r["buyer_address"].as_str() {
+            if b != a {
+                e.buyers.insert(b.to_string());
+            }
+        }
+        if r["seller_address"].as_str() != Some(a) {
+            e.secondary += 1;
+        }
+    }
+    let mut list: Vec<(String, Stat)> = by.into_iter().filter(|(_, s)| s.buyers.len() >= 2).collect();
+    list.sort_by(|a, b| b.1.buyers.len().cmp(&a.1.buyers.len()).then(b.1.volume.cmp(&a.1.volume)));
+    let mut out = format!(
+        "{NOTE}\nArtists with the most different collectors buying in the last {days} day(s), from {} fixed-price sales on objkt:\n",
+        rows.len()
+    );
+    for (a, st) in list.iter().take(n.clamp(1, 25)) {
+        out += &format!(
+            "- {} · {} collectors · {} sales ({} resale(s)) · {} · {}\n",
+            st.label,
+            st.buyers.len(),
+            st.sales,
+            st.secondary,
+            tez(st.volume),
+            profile_url(a)
+        );
+    }
+    if list.is_empty() {
+        out += "- no artist sold to two or more collectors in this window\n";
+    }
+    if rows.len() >= 2000 {
+        out += "(based on the latest 2000 sales only)\n";
+    }
+    out += "Activity, not quality or a recommendation: look an artist up (action=artist) and check pieces before buying.\n";
+    Ok(out)
+}
+
 // ---------- numbers for zero-token checks ----------
 
 /// New works minted by an artist in the last `minutes`.
@@ -483,16 +560,16 @@ pub fn tool_definition() -> Value {
     json!({ "type": "function", "function": {
         "name": "art",
         "description": "Read-only crypto-art research (Tezos/objkt): artists, works, sales, royalties, collectors, a wallet's \
-            collection, and checks before buying (provenance, edition, red flags). Never buys; give the objkt link. Not \
-            financial advice. action=watch sets a free alert: kind new|sold (who) or ask (piece, below).",
+            collection, and checks before buying (provenance, edition, red flags). action=trending finds artists. Never buys; give \
+            the objkt link. Not financial advice. action=watch sets a free alert: kind new|sold (who) or ask (piece, below).",
         "parameters": { "type": "object", "properties": {
-            "action": { "type": "string", "enum": ["artist", "works", "piece", "sales", "collectors", "holdings", "watch"] },
+            "action": { "type": "string", "enum": ["trending", "artist", "works", "piece", "sales", "collectors", "holdings", "watch"] },
             "who": { "type": "string", "description": "tz… address, .tez name or objkt username" },
             "piece": { "type": "string", "description": "objkt link or KT1…/id" },
             "kind": { "type": "string", "enum": ["new", "sold", "ask"] },
             "below": { "type": "number", "description": "watch kind=ask: alert under this many tez" },
             "every_minutes": { "type": "integer", "description": "watch: how often (default 30)" },
-            "days": { "type": "integer", "description": "sales window (default 30)" },
+            "days": { "type": "integer", "description": "window in days (sales: 30, trending: 7)" },
             "limit": { "type": "integer" }
         } }
     }})
@@ -509,7 +586,11 @@ pub fn run_tool(home: &std::path::Path, a: &Value) -> Result<String, String> {
         "" if !who.is_empty() => "artist",
         x => x,
     };
+    if who.is_empty() && matches!(action, "artist" | "works" | "sales" | "collectors" | "holdings") {
+        return Err("no artist or wallet given. To find artists, use action=trending; otherwise ask the user for a name".into());
+    }
     match action {
+        "trending" => trending(a["days"].as_u64().unwrap_or(7), n),
         "artist" => artist(who, n),
         "works" => works(who, n),
         "piece" => piece(if piece_arg.is_empty() { who } else { piece_arg }),
@@ -553,7 +634,8 @@ pub fn check(cmd: &str) -> Option<Result<String, String>> {
     }
 }
 
-pub const USAGE: &str = "usage: pagurus art artist|works|sales|collectors|holdings <who> [n|days]
+pub const USAGE: &str = "usage: pagurus art trending [days] [n]
+       pagurus art artist|works|sales|collectors|holdings <who> [n|days]
        pagurus art piece <objkt link | KT1…/id>
   numbers for heartbeat checks (zero tokens):
        pagurus art new <artist> <minutes>     new works minted in the last N minutes
@@ -564,6 +646,7 @@ pub fn cli(args: &[String]) -> Result<String, String> {
     let a = |i: usize| args.get(i).map(String::as_str).unwrap_or("");
     let n = |i: usize, d: u64| args.get(i).and_then(|s| s.parse().ok()).unwrap_or(d);
     match a(0) {
+        "trending" => trending(n(1, 7), n(2, 10) as usize),
         "artist" => artist(a(1), n(2, 10) as usize),
         "works" => works(a(1), n(2, 20) as usize),
         "sales" => sales(a(1), n(2, 30)),
