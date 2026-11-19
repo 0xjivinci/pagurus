@@ -1,0 +1,58 @@
+{
+ "token": [
+  {
+   "name": "LAN Party",
+   "description": "#200Tez Event | \n[ .GIF 15MB / Gastón Girbal - 2026 ]",
+   "mime": "image/gif",
+   "supply": 10,
+   "timestamp": "2026-11-18T17:55:16+00:00",
+   "lowest_ask": 20000000,
+   "flag": "none",
+   "display_uri": "ipfs://bafybeib2gf2by543vr2lja4u3s2fx4ngioiqbwlz3267ijjwibhb4ufsmy",
+   "thumbnail_uri": "ipfs://bafybeiflqf6f3ttq6zythdv4e5usgjdfqm4vmfyrqwi35xn55rhbwhb6jq",
+   "royalties": [
+    {
+     "amount": 1000,
+     "decimals": 4
+    }
+   ],
+   "creators": [
+    {
+     "creator_address": "tz2Aa4JRqVjtrx71zCbuJFYWTKM5y3Eg31X2",
+     "verified": true,
+     "holder": {
+      "alias": "Gastón Girbal",
+      "tzdomain": null,
+      "flag": "none",
+      "flag_reason": null
+     }
+    }
+   ],
+   "holders": [
+    {
+     "holder_address": "tz2Aa4JRqVjtrx71zCbuJFYWTKM5y3Eg31X2",
+     "quantity": 9
+    },
+    {
+     "holder_address": "tz1YbJAyfmSwqLbLwCrUTfEMeLgCncM9jj3z",
+     "quantity": 1
+    }
+   ],
+   "events": [
+    {
+     "price_xtz": 20000000,
+     "amount": 1,
+     "timestamp": "2026-11-19T03:30:55+00:00",
+     "marketplace_event_type": "list_buy",
+     "event_type": null,
+     "creator_address": "tz2Aa4JRqVjtrx71zCbuJFYWTKM5y3Eg31X2",
+     "recipient_address": "tz1YbJAyfmSwqLbLwCrUTfEMeLgCncM9jj3z",
+     "recipient": {
+      "alias": "Empress Trash",
+      "tzdomain": "empresstrash.tez"
+     }
+    }
+   ]
+  }
+ ]
+}

@@ -18,7 +18,7 @@ act, it gives you the objkt link and you do it in your own wallet. Nothing it sa
 - "How did my work sell this month, and what did I earn in royalties?"
 - "What's in my collection?" (your public tz… address)
 
-Two bundled skills guide it: `art-collector` and `art-artist`.
+Two bundled skills guide it: `art-collector` and `art-artist`. It can also look at a piece's preview image (`look`) when your model can see images.
 
 ## What a piece check covers
 
@@ -43,6 +43,7 @@ pagurus art sales <who> [days]        # primary and secondary sales, royalties e
 pagurus art collectors <who> [n]      # who holds their work
 pagurus art holdings <who> [n]        # a wallet's collection
 pagurus art piece <objkt link | KT1…/id>
+pagurus art look <objkt link | KT1…/id>   # fetch the preview image
 ```
 
 `<who>` is a tz… address, a `.tez` name or an objkt username.
@@ -59,5 +60,5 @@ These print a single number, so they work as [heartbeat checks](monitoring.md) w
 
 ## Limits
 
-- Sales figures cover fixed-price sales on objkt. Auctions and accepted offers are not included yet.
+- Sales cover objkt: fixed-price sales, English and Dutch auctions, accepted offers and open editions. Free claims are left out.
 - Data is objkt's; if objkt is slow or down, the tool says so.

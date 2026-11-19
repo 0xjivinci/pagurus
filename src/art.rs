@@ -22,8 +22,40 @@ fn agent() -> ureq::Agent {
         .build()
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Tests queue recorded objkt answers here instead of calling the network.
+    static MOCK: std::cell::RefCell<std::collections::VecDeque<Value>> = Default::default();
+}
+
+/// Answers from the last minute: one chat turn often asks the same thing twice.
+static CACHE: std::sync::Mutex<Vec<(String, std::time::Instant, Value)>> = std::sync::Mutex::new(Vec::new());
+const CACHE_SECS: u64 = 60;
+
 /// One GraphQL call with variables (user input never goes into the query text).
 fn gql(query: &str, vars: Value) -> Result<Value, String> {
+    #[cfg(test)]
+    if let Some(v) = MOCK.with(|m| m.borrow_mut().pop_front()) {
+        return Ok(v);
+    }
+    let key = format!("{query}\u{0}{vars}");
+    if let Ok(c) = CACHE.lock() {
+        if let Some((_, _, v)) = c.iter().find(|(k, t, _)| *k == key && t.elapsed().as_secs() < CACHE_SECS) {
+            return Ok(v.clone());
+        }
+    }
+    let v = gql_live(query, vars)?;
+    if let Ok(mut c) = CACHE.lock() {
+        c.retain(|(k, t, _)| *k != key && t.elapsed().as_secs() < CACHE_SECS);
+        if c.len() >= 32 {
+            c.remove(0);
+        }
+        c.push((key, std::time::Instant::now(), v.clone()));
+    }
+    Ok(v)
+}
+
+fn gql_live(query: &str, vars: Value) -> Result<Value, String> {
     let resp = agent()
         .post(OBJKT)
         .set("content-type", "application/json")
@@ -163,16 +195,51 @@ pub fn resolve(who: &str) -> Result<Who, String> {
 const WORKS_Q: &str = "query($a: String!, $n: Int!) { token(where: {creators: {creator_address: {_eq: $a}}, supply: {_gt: 0}}, \
     order_by: {timestamp: desc}, limit: $n) { token_id fa_contract name supply timestamp lowest_ask mime } }";
 
-const SALES_Q: &str = "query($a: String!, $since: timestamptz!, $n: Int!) { listing_sale(where: {token: {creators: \
-    {creator_address: {_eq: $a}}}, timestamp: {_gte: $since}}, order_by: {timestamp: desc}, limit: $n) { price_xtz timestamp \
-    seller_address buyer_address buyer { alias tzdomain } token { name token_id fa_contract royalties { amount decimals } } } }";
+/// objkt events that are sales: fixed price, English and Dutch auctions, accepted
+/// offers and open editions. Free claims (price 0) are left out.
+const SALE_FILTER: &str = "price_xtz: {_gt: 0}, _or: [{marketplace_event_type: {_in: [\"list_buy\", \"english_auction_settle\", \
+    \"dutch_auction_buy\", \"offer_accept\", \"offer_floor_accept\"]}}, {event_type: {_eq: \"open_edition_buy\"}}]";
 
-fn works_rows(addr: &str, n: usize) -> Result<Vec<Value>, String> {
-    Ok(gql(WORKS_Q, json!({ "a": addr, "n": n }))?["token"].as_array().cloned().unwrap_or_default())
+const SALE_FIELDS: &str = "price_xtz amount timestamp marketplace_event_type event_type creator_address recipient_address \
+    recipient { alias tzdomain }";
+
+/// One sale in the shape the rest of this file uses: seller/buyer addresses,
+/// `price_xtz` = the total paid, `unit_xtz` = per edition, `kind` = how it sold.
+/// In objkt events the `creator` is the seller and the `recipient` the buyer.
+fn sale(e: &Value) -> Value {
+    let unit = num(&e["price_xtz"]).unwrap_or(0);
+    let amount = num(&e["amount"]).unwrap_or(1).max(1);
+    let kind = match (e["marketplace_event_type"].as_str(), e["event_type"].as_str()) {
+        (Some("english_auction_settle"), _) => "auction",
+        (Some("dutch_auction_buy"), _) => "dutch auction",
+        (Some("offer_accept" | "offer_floor_accept"), _) => "offer",
+        (_, Some("open_edition_buy")) => "open edition",
+        _ => "fixed price",
+    };
+    json!({
+        "price_xtz": unit * amount,
+        "unit_xtz": unit,
+        "amount": amount,
+        "kind": kind,
+        "timestamp": e["timestamp"],
+        "seller_address": e["creator_address"],
+        "buyer_address": e["recipient_address"],
+        "buyer": e["recipient"],
+        "token": e["token"],
+    })
 }
 
 fn sales_rows(addr: &str, since: &str, n: usize) -> Result<Vec<Value>, String> {
-    Ok(gql(SALES_Q, json!({ "a": addr, "since": since, "n": n }))?["listing_sale"].as_array().cloned().unwrap_or_default())
+    let q = format!(
+        "query($a: String!, $since: timestamptz!, $n: Int!) {{ event(where: {{token: {{creators: {{creator_address: {{_eq: $a}}}}}}, \
+         timestamp: {{_gte: $since}}, {SALE_FILTER}}}, order_by: {{timestamp: desc}}, limit: $n) {{ {SALE_FIELDS} \
+         token {{ name token_id fa_contract royalties {{ amount decimals }} }} }} }}"
+    );
+    Ok(gql(&q, json!({ "a": addr, "since": since, "n": n.min(500) }))?["event"].as_array().map(|a| a.iter().map(sale).collect()).unwrap_or_default())
+}
+
+fn works_rows(addr: &str, n: usize) -> Result<Vec<Value>, String> {
+    Ok(gql(WORKS_Q, json!({ "a": addr, "n": n }))?["token"].as_array().cloned().unwrap_or_default())
 }
 
 fn since(minutes: u64) -> String {
@@ -197,7 +264,7 @@ fn work_line(t: &Value) -> String {
 pub fn artist(who: &str, n: usize) -> Result<String, String> {
     let w = resolve(who)?;
     let works = works_rows(&w.address, n.clamp(1, 20))?;
-    let sales = sales_rows(&w.address, &since(90 * 24 * 60), 50)?;
+    let sales = sales_rows(&w.address, &since(90 * 24 * 60), 500)?;
     let mut out = format!("{NOTE}\nArtist: {} · {}\n", w.label(), profile_url(&w.address));
     if !w.flag.is_empty() {
         out += &format!("⚠ objkt has flagged this account ({})\n", w.flag);
@@ -217,7 +284,13 @@ pub fn artist(who: &str, n: usize) -> Result<String, String> {
 fn sales_summary(artist: &str, sales: &[Value], window: &str) -> String {
     let (mut prim, mut sec, mut roy) = (0i64, 0i64, 0f64);
     let (mut np, mut ns) = (0, 0);
+    let mut kinds: Vec<(&str, usize)> = Vec::new();
     for s in sales {
+        let k = s["kind"].as_str().unwrap_or("fixed price");
+        match kinds.iter_mut().find(|(n, _)| *n == k) {
+            Some(e) => e.1 += 1,
+            None => kinds.push((k, 1)),
+        }
         let p = num(&s["price_xtz"]).unwrap_or(0);
         if s["seller_address"].as_str() == Some(artist) {
             prim += p;
@@ -229,28 +302,36 @@ fn sales_summary(artist: &str, sales: &[Value], window: &str) -> String {
         }
     }
     let mut out = format!(
-        "\nFixed-price sales, {window}: {} primary ({}), {} secondary ({}), royalties from secondary ≈ {}\n",
+        "\nSales, {window}: {} primary ({}), {} secondary ({}), royalties from secondary ≈ {}\n",
         np,
         tez(prim),
         ns,
         tez(sec),
         tez(roy as i64)
     );
+    if !kinds.is_empty() {
+        out += &format!("By type: {}\n", kinds.iter().map(|(k, n)| format!("{n} {k}")).collect::<Vec<_>>().join(", "));
+    }
     for s in sales.iter().take(8) {
         let t = &s["token"];
         let buyer = s["buyer_address"].as_str().unwrap_or("");
+        let editions = match num(&s["amount"]).unwrap_or(1) {
+            1 => String::new(),
+            n => format!(" ×{n}"),
+        };
         out += &format!(
-            "- {} · {} · {} → {}\n",
+            "- {} · {}{} · {} ({}) → {}\n",
             day(&s["timestamp"]),
             t["name"].as_str().unwrap_or("(untitled)"),
+            editions,
             tez(num(&s["price_xtz"]).unwrap_or(0)),
+            s["kind"].as_str().unwrap_or("sale"),
             holder_label(&s["buyer"], buyer)
         );
     }
-    if sales.len() >= 50 {
-        out += "(showing the latest 50 sales only)\n";
+    if sales.len() >= 500 {
+        out += "(counted from the latest 500 sales only)\n";
     }
-    out += "Auctions and accepted offers are not included.\n";
     out
 }
 
@@ -268,7 +349,7 @@ pub fn works(who: &str, n: usize) -> Result<String, String> {
 pub fn sales(who: &str, days: u64) -> Result<String, String> {
     let w = resolve(who)?;
     let days = days.clamp(1, 365);
-    let rows = sales_rows(&w.address, &since(days * 24 * 60), 50)?;
+    let rows = sales_rows(&w.address, &since(days * 24 * 60), 500)?;
     Ok(format!("{NOTE}\nSales of work by {}:{}", w.label(), sales_summary(&w.address, &rows, &format!("last {days} days"))))
 }
 
@@ -280,11 +361,15 @@ pub fn parse_piece(s: &str) -> Option<(String, String)> {
     Some((parts[i].to_string(), id.to_string()))
 }
 
-const PIECE_Q: &str = "query($c: String!, $t: String!) { token(where: {fa_contract: {_eq: $c}, token_id: {_eq: $t}}) { \
-    name description mime supply timestamp lowest_ask flag royalties { amount decimals } \
-    creators { creator_address verified holder { alias tzdomain flag flag_reason } } \
-    holders(where: {quantity: {_gt: 0}}, limit: 500) { holder_address quantity } \
-    listing_sales(order_by: {timestamp: desc}, limit: 20) { price_xtz timestamp seller_address buyer_address } } }";
+fn piece_q() -> String {
+    format!(
+        "query($c: String!, $t: String!) {{ token(where: {{fa_contract: {{_eq: $c}}, token_id: {{_eq: $t}}}}) {{ \
+         name description mime supply timestamp lowest_ask flag display_uri thumbnail_uri royalties {{ amount decimals }} \
+         creators {{ creator_address verified holder {{ alias tzdomain flag flag_reason }} }} \
+         holders(where: {{quantity: {{_gt: 0}}}}, limit: 500) {{ holder_address quantity }} \
+         events(where: {{{SALE_FILTER}}}, order_by: {{timestamp: desc}}, limit: 30) {{ {SALE_FIELDS} }} }} }}"
+    )
+}
 
 const COPIES_Q: &str = "query($n: String!, $a: [String!]!) { token(where: {name: {_eq: $n}, creators: {creator_address: {_nin: $a}}}, \
     limit: 5) { fa_contract token_id creators { creator_address } } }";
@@ -294,13 +379,13 @@ pub fn piece(spec: &str) -> Result<String, String> {
         return Err(ETH_LATER.into());
     }
     let (c, id) = parse_piece(spec).ok_or("give the piece as an objkt link or contract + token id, e.g. KT1…/123")?;
-    let d = gql(PIECE_Q, json!({ "c": c, "t": id }))?;
+    let d = gql(&piece_q(), json!({ "c": c, "t": id }))?;
     let t = d["token"].get(0).cloned().ok_or(format!("no token {id} on contract {c}"))?;
     let name = t["name"].as_str().filter(|s| !s.is_empty()).unwrap_or("(untitled)").to_string();
     let creators = t["creators"].as_array().cloned().unwrap_or_default();
     let creator_addrs: Vec<String> = creators.iter().filter_map(|x| x["creator_address"].as_str().map(String::from)).collect();
     let holders = t["holders"].as_array().cloned().unwrap_or_default();
-    let sales = t["listing_sales"].as_array().cloned().unwrap_or_default();
+    let sales: Vec<Value> = t["events"].as_array().map(|a| a.iter().map(sale).collect()).unwrap_or_default();
 
     let mut out = format!("{NOTE}\n{name} · {}\n", piece_url(&c, &id));
     for cr in &creators {
@@ -316,14 +401,22 @@ pub fn piece(spec: &str) -> Result<String, String> {
         royalty_pct(&t),
         t["mime"].as_str().unwrap_or("unknown format")
     );
+    if let Some(u) = image_urls(t["display_uri"].as_str().or(t["thumbnail_uri"].as_str()).unwrap_or("")).first() {
+        out += &format!("Preview image: {u} (action=look shows it to you)\n");
+    }
     out += &match num(&t["lowest_ask"]) {
         Some(m) => format!("Lowest ask now: {}\n", tez(m)),
         None => "Not listed for sale right now.\n".into(),
     };
     if !sales.is_empty() {
-        out += "Recent fixed-price sales:\n";
+        out += "Recent sales (price per edition):\n";
         for s in sales.iter().take(8) {
-            out += &format!("- {} · {}\n", day(&s["timestamp"]), tez(num(&s["price_xtz"]).unwrap_or(0)));
+            out += &format!(
+                "- {} · {} · {}\n",
+                day(&s["timestamp"]),
+                tez(num(&s["unit_xtz"]).unwrap_or(0)),
+                s["kind"].as_str().unwrap_or("sale")
+            );
         }
     }
 
@@ -384,7 +477,8 @@ fn wash_pattern(sales: &[Value]) -> Option<String> {
 /// Asking price far above what the piece has sold for.
 fn outlier(sales: &[Value], ask: Option<i64>) -> Option<String> {
     let ask = ask? as f64;
-    let mut prices: Vec<f64> = sales.iter().filter_map(|s| num(&s["price_xtz"]).map(|p| p as f64)).filter(|p| *p > 0.0).collect();
+    let mut prices: Vec<f64> =
+        sales.iter().filter_map(|s| num(&s["unit_xtz"]).or_else(|| num(&s["price_xtz"])).map(|p| p as f64)).filter(|p| *p > 0.0).collect();
     if prices.len() < 3 {
         return None;
     }
@@ -453,9 +547,13 @@ pub fn collectors(who: &str, n: usize) -> Result<String, String> {
     Ok(out)
 }
 
-const TREND_Q: &str = "query($since: timestamptz!, $off: Int!) { listing_sale(where: {timestamp: {_gte: $since}}, \
-    order_by: {timestamp: desc}, limit: 500, offset: $off) { price_xtz buyer_address seller_address \
-    token { creators { creator_address holder { alias tzdomain flag flag_reason } } } } }";
+fn trend_q() -> String {
+    format!(
+        "query($since: timestamptz!, $off: Int!) {{ event(where: {{timestamp: {{_gte: $since}}, {SALE_FILTER}}}, \
+         order_by: {{timestamp: desc}}, limit: 500, offset: $off) {{ {SALE_FIELDS} \
+         token {{ creators {{ creator_address holder {{ alias tzdomain flag flag_reason }} }} }} }} }}"
+    )
+}
 
 /// Artists whose work sold to the most different collectors lately (then by volume).
 /// Distinct buyers first, so a few wallets trading among themselves can't push anyone up.
@@ -464,7 +562,10 @@ pub fn trending(days: u64, n: usize) -> Result<String, String> {
     let from = since(days * 24 * 60);
     let mut rows = Vec::new();
     for page in 0..4 {
-        let batch = gql(TREND_Q, json!({ "since": from, "off": page * 500 }))?["listing_sale"].as_array().cloned().unwrap_or_default();
+        let batch: Vec<Value> = gql(&trend_q(), json!({ "since": from, "off": page * 500 }))?["event"]
+            .as_array()
+            .map(|a| a.iter().map(sale).collect())
+            .unwrap_or_default();
         let last = batch.len() < 500;
         rows.extend(batch);
         if last {
@@ -506,7 +607,7 @@ pub fn trending(days: u64, n: usize) -> Result<String, String> {
     let mut list: Vec<(String, Stat)> = by.into_iter().filter(|(_, s)| s.buyers.len() >= 2).collect();
     list.sort_by(|a, b| b.1.buyers.len().cmp(&a.1.buyers.len()).then(b.1.volume.cmp(&a.1.volume)));
     let mut out = format!(
-        "{NOTE}\nArtists with the most different collectors buying in the last {days} day(s), from {} fixed-price sales on objkt:\n",
+        "{NOTE}\nArtists with the most different collectors buying in the last {days} day(s), from {} sales on objkt:\n",
         rows.len()
     );
     for (a, st) in list.iter().take(n.clamp(1, 25)) {
@@ -524,10 +625,79 @@ pub fn trending(days: u64, n: usize) -> Result<String, String> {
         out += "- no artist sold to two or more collectors in this window\n";
     }
     if rows.len() >= 2000 {
-        out += "(based on the latest 2000 sales only)\n";
+        let oldest = rows.last().map(|r| day(&r["timestamp"])).unwrap_or_default();
+        out += &format!("(the latest 2000 sales only, back to {oldest})\n");
     }
     out += "Activity, not quality or a recommendation: look an artist up (action=artist) and check pieces before buying.\n";
     Ok(out)
+}
+
+/// ipfs://CID → image URLs to try in order: objkt's own CDN (fast, what objkt.com
+/// shows), then public IPFS gateways (which rate-limit under load); http(s) as is.
+fn image_urls(uri: &str) -> Vec<String> {
+    match uri.strip_prefix("ipfs://") {
+        Some(rest) if !rest.is_empty() => {
+            let cid = rest.split('/').next().unwrap_or(rest);
+            vec![
+                format!("https://assets.objkt.media/file/assets-003/{cid}/artifact"),
+                format!("https://gateway.pinata.cloud/ipfs/{rest}"),
+                format!("https://ipfs.io/ipfs/{rest}"),
+            ]
+        }
+        _ if uri.starts_with("https://") || uri.starts_with("http://") => vec![uri.to_string()],
+        _ => Vec::new(),
+    }
+}
+
+fn fetch_image(urls: &[String]) -> Result<Vec<u8>, String> {
+    let mut last = "no image link".to_string();
+    for u in urls {
+        match agent().get(u).call() {
+            Ok(resp) => {
+                let mut buf = Vec::new();
+                resp.into_reader()
+                    .take(crate::util::MAX_IMAGE_BYTES as u64 + 1)
+                    .read_to_end(&mut buf)
+                    .map_err(|e| e.to_string())?;
+                if buf.len() > crate::util::MAX_IMAGE_BYTES {
+                    return Err("the preview image is larger than 5 MB".into());
+                }
+                return Ok(buf);
+            }
+            Err(e) => last = e.to_string(),
+        }
+    }
+    Err(format!("couldn't download the preview: {last}"))
+}
+
+/// Show the model a piece's preview image, so it can describe the art itself.
+pub fn look(spec: &str) -> Result<String, String> {
+    let (c, id) = parse_piece(spec).ok_or("give the piece as an objkt link or KT1…/id")?;
+    let q = "query($c: String!, $t: String!) { token(where: {fa_contract: {_eq: $c}, token_id: {_eq: $t}}) { name mime display_uri thumbnail_uri } }";
+    let d = gql(q, json!({ "c": c, "t": id }))?;
+    let t = d["token"].get(0).cloned().ok_or(format!("no token {id} on contract {c}"))?;
+    let name = t["name"].as_str().filter(|s| !s.is_empty()).unwrap_or("(untitled)").to_string();
+    // the display image first; the small thumbnail when it is too big or won't load
+    let mut bytes = Err("this piece has no preview image".to_string());
+    for key in ["display_uri", "thumbnail_uri"] {
+        let urls = image_urls(t[key].as_str().unwrap_or(""));
+        if urls.is_empty() {
+            continue;
+        }
+        bytes = fetch_image(&urls);
+        if bytes.is_ok() {
+            break;
+        }
+    }
+    let bytes = bytes?;
+    let data_url = crate::util::image_data_url(&bytes).map_err(|e| format!("the preview isn't a picture pagurus can show ({e})"))?;
+    crate::tools::show_image(format!("{name} ({})", piece_url(&c, &id)), data_url);
+    Ok(format!(
+        "The preview of \"{name}\" ({} KB, original format {}) is attached below for you to look at. Describe what you see; \
+         a preview can differ from the original (video, animation or interactive work).",
+        bytes.len() / 1024,
+        t["mime"].as_str().unwrap_or("unknown")
+    ))
 }
 
 // ---------- numbers for zero-token checks ----------
@@ -563,7 +733,7 @@ pub fn tool_definition() -> Value {
             collection, and checks before buying (provenance, edition, red flags). action=trending finds artists. Never buys; give \
             the objkt link. Not financial advice. action=watch sets a free alert: kind new|sold (who) or ask (piece, below).",
         "parameters": { "type": "object", "properties": {
-            "action": { "type": "string", "enum": ["trending", "artist", "works", "piece", "sales", "collectors", "holdings", "watch"] },
+            "action": { "type": "string", "enum": ["trending", "artist", "works", "piece", "look", "sales", "collectors", "holdings", "watch"] },
             "who": { "type": "string", "description": "tz… address, .tez name or objkt username" },
             "piece": { "type": "string", "description": "objkt link or KT1…/id" },
             "kind": { "type": "string", "enum": ["new", "sold", "ask"] },
@@ -594,6 +764,7 @@ pub fn run_tool(home: &std::path::Path, a: &Value) -> Result<String, String> {
         "artist" => artist(who, n),
         "works" => works(who, n),
         "piece" => piece(if piece_arg.is_empty() { who } else { piece_arg }),
+        "look" => look(if piece_arg.is_empty() { who } else { piece_arg }),
         "sales" => sales(who, a["days"].as_u64().unwrap_or(30)),
         "collectors" => collectors(who, n),
         "holdings" => holdings(who, n),
@@ -637,6 +808,7 @@ pub fn check(cmd: &str) -> Option<Result<String, String>> {
 pub const USAGE: &str = "usage: pagurus art trending [days] [n]
        pagurus art artist|works|sales|collectors|holdings <who> [n|days]
        pagurus art piece <objkt link | KT1…/id>
+       pagurus art look <objkt link | KT1…/id>    fetch the preview image
   numbers for heartbeat checks (zero tokens):
        pagurus art new <artist> <minutes>     new works minted in the last N minutes
        pagurus art sold <artist> <minutes>    fixed-price sales in the last N minutes
@@ -653,6 +825,7 @@ pub fn cli(args: &[String]) -> Result<String, String> {
         "collectors" => collectors(a(1), n(2, 20) as usize),
         "holdings" => holdings(a(1), n(2, 20) as usize),
         "piece" => piece(&args[1..].join(" ")),
+        "look" => look(&args[1..].join(" ")).map(|m| format!("{m}\n(in a chat the model sees the image; here only the download is checked)")),
         "new" => new_count(a(1), n(2, 60)).map(|c| c.to_string()),
         "sold" => sold_count(a(1), n(2, 60)).map(|c| c.to_string()),
         "ask" => lowest_ask(&args[1..].join(" ")).map(|p| p.map_or("999999999".into(), |t| format!("{t}"))),
@@ -704,6 +877,65 @@ mod tests {
         assert!(c.cmd.starts_with("pagurus art ask KT1LnP9xJM1Y5mnCvXnwpUQzTi3z5yYcwhu7/182"));
         assert!(watch(&home, "ask", "", "KT1LnP9xJM1Y5mnCvXnwpUQzTi3z5yYcwhu7/182", None, 30).is_err(), "needs a price");
         assert!(watch(&home, "fly", "x", "", None, 30).is_err());
+    }
+
+    #[test]
+    fn previews_come_from_public_gateways() {
+        assert_eq!(image_urls("ipfs://QmAbc")[0], "https://assets.objkt.media/file/assets-003/QmAbc/artifact");
+        assert_eq!(image_urls("ipfs://QmAbc/1.png")[1], "https://gateway.pinata.cloud/ipfs/QmAbc/1.png");
+        assert_eq!(image_urls("ipfs://QmAbc").len(), 3);
+        assert_eq!(image_urls("https://x.example/a.jpg"), vec!["https://x.example/a.jpg".to_string()]);
+        assert!(image_urls("").is_empty() && image_urls("ipfs://").is_empty() && image_urls("file:///etc/passwd").is_empty());
+    }
+
+    #[test]
+    fn sales_from_events_count_editions_and_sellers() {
+        let e = json!({"price_xtz": 1_000_000, "amount": 2, "marketplace_event_type": "list_buy",
+            "creator_address": "tzSELLER", "recipient_address": "tzBUYER", "timestamp": "2026-11-19T00:00:00+00:00"});
+        let s = sale(&e);
+        assert_eq!((num(&s["price_xtz"]), num(&s["unit_xtz"])), (Some(2_000_000), Some(1_000_000)), "total = unit × editions");
+        assert_eq!((s["seller_address"].as_str(), s["buyer_address"].as_str()), (Some("tzSELLER"), Some("tzBUYER")));
+        assert_eq!(sale(&json!({"marketplace_event_type": "english_auction_settle", "price_xtz": 5}))["kind"], "auction");
+        assert_eq!(sale(&json!({"event_type": "open_edition_buy", "price_xtz": 5}))["kind"], "open edition");
+        assert_eq!(sale(&json!({"marketplace_event_type": "offer_floor_accept", "price_xtz": 5}))["kind"], "offer");
+    }
+
+    fn mock(answers: Vec<Value>) {
+        MOCK.with(|m| m.borrow_mut().extend(answers));
+    }
+
+    const PIECE: &str = "https://objkt.com/tokens/KT1XaCf6gkjFnKg3QmPfn6gep53moMvjkj1E/50722";
+
+    #[test]
+    fn piece_report_from_a_recorded_answer() {
+        let recorded: Value = serde_json::from_str(include_str!("art_fixtures/piece.json")).unwrap();
+        mock(vec![recorded, json!({"token": []})]);
+        let out = piece(PIECE).unwrap();
+        for want in ["LAN Party", "verified", "edition of 10", "2 holder(s)", "royalties 10.0%", "Lowest ask now: 20 ꜩ",
+            "Recent sales (price per edition)", "Preview image: https://assets.objkt.media/", "No red flags"] {
+            assert!(out.contains(want), "missing {want:?} in:\n{out}");
+        }
+    }
+
+    #[test]
+    fn every_red_flag_shows_up() {
+        let mut d: Value = serde_json::from_str(include_str!("art_fixtures/piece.json")).unwrap();
+        let t = &mut d["token"][0];
+        t["creators"][0]["verified"] = json!(false);
+        t["creators"][0]["holder"]["flag"] = json!("flagged");
+        t["creators"][0]["holder"]["flag_reason"] = json!("copyminting");
+        t["lowest_ask"] = json!(500_000_000);
+        let ev = |seller: &str, buyer: &str, p: i64| json!({"price_xtz": p, "amount": 1, "marketplace_event_type": "list_buy",
+            "creator_address": seller, "recipient_address": buyer, "timestamp": "2026-11-18T00:00:00+00:00"});
+        t["events"] = json!([ev("tzA", "tzB", 10_000_000), ev("tzB", "tzA", 11_000_000), ev("tzA", "tzC", 12_000_000)]);
+        let copies = json!({"token": [{"fa_contract": "KT1LnP9xJM1Y5mnCvXnwpUQzTi3z5yYcwhu7", "token_id": "9", "creators": []}]});
+        mock(vec![d, copies]);
+        let out = piece(PIECE).unwrap();
+        for want in ["flagged the creator account (flagged: copyminting)", "isn't verified", "sold this piece back and forth",
+            "over 3× the median sale", "same title", "Look at these before buying"] {
+            assert!(out.contains(want), "missing {want:?} in:\n{out}");
+        }
+        assert!(!out.contains("No red flags"));
     }
 
     #[test]
