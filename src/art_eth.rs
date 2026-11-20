@@ -338,7 +338,7 @@ pub fn piece(home: &Path, spec: &str) -> Result<String, String> {
         col["total_supply"].as_u64().map(|s| s.to_string()).unwrap_or_else(|| "?".into())
     );
     if let Some(img) = nft["display_image_url"].as_str().or(nft["image_url"].as_str()).filter(|s| !s.is_empty()) {
-        out += &format!("Preview image: {img} (action=look shows it to you)\n");
+        out += &format!("Preview image: {img}\nTo see the artwork yourself, call art with action=look and this piece (you can see images).\n");
     }
     let ask = best.as_ref().map(|b| {
         let p = &b["price"]["current"];

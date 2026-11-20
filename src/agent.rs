@@ -1075,7 +1075,7 @@ fn about(cfg: &Config, home: &std::path::Path) -> String {
 fn abilities(cfg: &Config, home: &std::path::Path) -> String {
     let v = &cfg.voice;
     let voice = match (v.stt_url.is_empty(), v.tts_url.is_empty()) {
-        (true, _) => "off here: voice notes can't be understood until the user sets [voice] stt_url in config.toml                       (an OpenAI-compatible /audio/transcriptions endpoint such as Groq or a local whisper server)"
+        (true, _) => "off here: voice notes can't be understood until the user sets [voice] stt_url in config.toml (an OpenAI-compatible /audio/transcriptions endpoint such as Groq or a local whisper server)"
             .to_string(),
         (false, true) => "on: voice notes are transcribed and answered in text (spoken replies need [voice] tts_url)".to_string(),
         (false, false) => "on: voice notes are transcribed, and voice notes get spoken replies".to_string(),
@@ -1097,8 +1097,15 @@ fn abilities(cfg: &Config, home: &std::path::Path) -> String {
            estimate or invent one.\n",
         cfg.agent.delegate_parallel.max(1),
         if cfg.board.workers > 0 { format!("{} worker(s) here", cfg.board.workers) } else { "off here: board.workers is 0".into() },
-    )
+    ) + ART_FACT
 }
+
+/// uge: the crypto-art tool, and that it can show the model artwork.
+#[cfg(feature = "art")]
+const ART_FACT: &str = "- Crypto art: the `art` tool researches Tezos (objkt) and Ethereum (OpenSea) art read-only. Its action=look \
+    shows you a piece's image, so you can see and describe artwork yourself when your model has vision.\n";
+#[cfg(not(feature = "art"))]
+const ART_FACT: &str = "";
 
 /// Plain-text transcript for reflection and summaries. Failed tool calls are
 /// marked so reflection can learn from them.

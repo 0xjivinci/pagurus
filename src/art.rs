@@ -426,7 +426,7 @@ pub fn piece(spec: &str) -> Result<String, String> {
         t["mime"].as_str().unwrap_or("unknown format")
     );
     if let Some(u) = image_urls(t["display_uri"].as_str().or(t["thumbnail_uri"].as_str()).unwrap_or("")).first() {
-        out += &format!("Preview image: {u} (action=look shows it to you)\n");
+        out += &format!("Preview image: {u}\nTo see the artwork yourself, call art with action=look and this piece (you can see images).\n");
     }
     out += &match num(&t["lowest_ask"]) {
         Some(m) => format!("Lowest ask now: {}\n", tez(m)),
@@ -766,7 +766,7 @@ pub fn tool_definition() -> Value {
         "name": "art",
         "description": "Read-only crypto-art research (Tezos/objkt; Ethereum/OpenSea with chain=ethereum or 0x… targets): artists, works, sales, royalties, collectors, a wallet's \
             collection, and checks before buying (provenance, edition, red flags). Discover: trending, quiet (sold before, silent \
-            now), new, style (tag), similar (shared collectors), search (names). Never buys; give the link. Not financial advice. action=watch sets a free alert: kind new|sold (who) or ask (piece, below).",
+            now), new, style (tag), similar (shared collectors), search (names). look = see a piece's image yourself. Never buys. Not financial advice. action=watch sets a free alert: kind new|sold (who) or ask (piece, below).",
         "parameters": { "type": "object", "properties": {
             "action": { "type": "string", "enum": ["trending", "quiet", "new", "style", "similar", "search", "artist", "works", "piece", "collection", "look", "sales", "collectors", "holdings", "watch"] },
             "chain": { "type": "string", "enum": ["tezos", "ethereum"] },
