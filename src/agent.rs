@@ -204,6 +204,12 @@ impl Agent {
         )
     }
 
+    /// Rebuild the system prompt (after opening or closing a project).
+    #[cfg_attr(not(feature = "code"), allow(dead_code))]
+    pub fn refresh_system(&mut self) {
+        self.system = system_prompt(&self.home, &self.cfg);
+    }
+
     pub fn switch_model(&mut self, cfg: &Config) -> Result<(), String> {
         let live = self.llm.live();
         self.llm = Llm::new(&cfg.provider)?;
@@ -292,8 +298,15 @@ impl Agent {
         self.push(Msg::user_with_images(&text, images));
         let defs = tools::definitions(&self.cfg, self.set);
         let started = std::time::Instant::now();
-        let budget = std::time::Duration::from_secs(self.cfg.agent.turn_budget_secs.max(30));
-        let rounds = self.cfg.agent.max_iterations.max(1);
+        #[cfg_attr(not(feature = "code"), allow(unused_mut))]
+        let (mut secs, mut rounds) = (self.cfg.agent.turn_budget_secs.max(30), self.cfg.agent.max_iterations.max(1));
+        #[cfg(feature = "code")]
+        if crate::code::root().is_some() && self.set == Set::Full {
+            // coding takes more steps: read, edit, test, fix
+            (secs, rounds) = (secs.max(1800), rounds.max(60));
+            crate::code::turn_begin(&self.home);
+        }
+        let budget = std::time::Duration::from_secs(secs);
         // which skills this turn followed, and whether anything failed after loading one
         let mut viewed: Vec<String> = Vec::new();
         let mut failed_after = false;
@@ -330,6 +343,13 @@ impl Agent {
             let text = reply.content.clone().unwrap_or_default();
             self.push(reply);
             if calls.is_empty() {
+                #[cfg(feature = "code")]
+                if self.set == Set::Full && round < rounds {
+                    if let Some(n) = crate::code::unchecked_note() {
+                        self.push(Msg::user(&n)); // changed code but didn't test it: once more
+                        continue;
+                    }
+                }
                 self.turns_since_review += 1;
                 self.settle_skills(viewed, !failed_after);
                 return Ok(text);
@@ -1216,6 +1236,18 @@ const SAMPLE: &str = "`top -b -n 2 -d 3` (read the second sample; ps %CPU is a l
 const SAMPLE: &str = "`top -l 2 -s 3 -o cpu -n 15` (read the second sample; ps %CPU is a decaying average); \
 per thread: `ps -M -p PID`";
 
+/// The open project's part of the system prompt (coding build), last so the rest stays cacheable.
+fn project_section() -> String {
+    #[cfg(feature = "code")]
+    {
+        crate::code::prompt_section()
+    }
+    #[cfg(not(feature = "code"))]
+    {
+        String::new()
+    }
+}
+
 pub fn system_prompt(home: &std::path::Path, cfg: &Config) -> String {
     let soul = read(&home.join("SOUL.md"));
     let skills = skill_lines(home, 60);
@@ -1250,7 +1282,7 @@ pub fn system_prompt(home: &std::path::Path, cfg: &Config) -> String {
            and messages the user on Telegram. Don't set up cron jobs, systemd timers or notification tools for this.\n\n\
          # Skills (call skill_view before following one)\n{}\n\n\
          # Memory (MEMORY.md)\n{}\n\n# User profile (USER.md)\n{}\n\n\
-         Session started {}.\n",
+         Session started {}.\n{}",
         // stable first, changing last: providers that cache prompts can reuse the unchanged start
         or_empty(&soul),
         about(cfg, home),
@@ -1266,6 +1298,7 @@ pub fn system_prompt(home: &std::path::Path, cfg: &Config) -> String {
         or_empty(&read(&learn::file_for(home, Target::Memory))),
         or_empty(&read(&learn::file_for(home, Target::User))),
         fmt_time(now()),
+        project_section(),
     )
 }
 
@@ -1305,6 +1338,19 @@ pub fn repl(home: PathBuf, cfg: Config) -> Result<(), String> {
             "/status" => println!("{}", a.status_text(session_tokens)),
             "/tools" => println!("{}", tool_list(&a.cfg)),
             "/copy" => println!("{}", copy(&last_answer)),
+            #[cfg(feature = "code")]
+            "/project" => {
+                let arg = words.collect::<Vec<_>>().join(" ");
+                let msg = match arg.as_str() {
+                    "" => crate::code::current().map(|p| format!("Project: {} (/project off closes it)", p.root.display())).unwrap_or_else(|| "No project open. /project <folder> opens one.".into()),
+                    "off" | "close" => crate::code::close(),
+                    path => crate::code::open(&home, path).unwrap_or_else(|e| format!("error: {e}")),
+                };
+                a.refresh_system();
+                println!("{msg}");
+            }
+            #[cfg(feature = "code")]
+            "/revert" => println!("{}", crate::code::revert(&home).unwrap_or_else(|e| e)),
             "/new" => {
                 let t0 = now();
                 if a.has_unreviewed() {
@@ -1400,7 +1446,7 @@ pub fn repl(home: PathBuf, cfg: Config) -> Result<(), String> {
 
 const REPL_COMMANDS: &[&str] = &[
     "/help", "/new", "/status", "/model", "/tools", "/pin", "/pins", "/unpin", "/good", "/bad", "/undo", "/retry", "/copy",
-    "/edit", "/image", "/rollback", "/procs", "/yolo", "/audit", "/learn", "/review", "/clear", "/exit",
+    "/edit", "/image", "/rollback", "/procs", "/yolo", "/audit", "/learn", "/review", "/clear", "/exit", "/project", "/revert",
 ];
 
 const REPL_HELP: &str = "Conversation
@@ -1414,6 +1460,9 @@ Model and status
   /model [n | background n]   list or switch models
   /status                  model, context use, tokens, yolo, learning
   /tools                   what pagurus can use right now
+Coding (full build)
+  /project <folder> · /project off   work on a code base: edit there, grep/glob, run its tests, git
+  /revert                  put back every file the last answer changed
 Safety
   /yolo [30m|off]          run commands without asking for a while (the safety floor stays)
   /audit [all]             what ran and who decided

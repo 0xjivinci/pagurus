@@ -77,20 +77,33 @@ fn norm(l: &str) -> String {
         .join(" ")
 }
 
-/// edit_file on an already-confined path.
+/// One replacement (tests; the tool uses `edit_many`).
+#[cfg(test)]
 pub fn edit(home: &Path, p: &Path, old: &str, new: &str, all: bool) -> Result<String, String> {
+    edit_many(home, p, &[(old.to_string(), new.to_string(), all)]).map(|r| r.0)
+}
+
+/// Several replacements in one file, all or none. Returns (message, before, after).
+pub fn edit_many(home: &Path, p: &Path, edits: &[(String, String, bool)]) -> Result<(String, String, String), String> {
     let bytes = std::fs::read(p).map_err(|e| format!("{}: {e}", p.display()))?;
     if bytes.iter().take(1024).any(|b| *b == 0) {
         return Err("binary file".into());
     }
-    let text = String::from_utf8(bytes).map_err(|_| "not a UTF-8 text file; use write_file")?;
-    let (out, how) = replace(&text, old, new, all)?;
-    if out.len() > 1024 * 1024 {
+    let before = String::from_utf8(bytes).map_err(|_| "not a UTF-8 text file; use write_file")?;
+    let mut text = before.clone();
+    let mut hows = Vec::new();
+    for (i, (old, new, all)) in edits.iter().enumerate() {
+        let (out, how) = replace(&text, old, new, *all).map_err(|e| if edits.len() > 1 { format!("edit {}: {e} (nothing was changed)", i + 1) } else { e })?;
+        text = out;
+        hows.push(how);
+    }
+    if text.len() > 1024 * 1024 {
         return Err("result larger than 1 MiB".into());
     }
     let id = checkpoint(home, p);
-    std::fs::write(p, &out).map_err(|e| e.to_string())?;
-    Ok(format!("edited {} {how}{}", p.display(), id.map(|i| format!(" (undo: /rollback {i})")).unwrap_or_default()))
+    std::fs::write(p, &text).map_err(|e| e.to_string())?;
+    let how = if hows.len() == 1 { hows.remove(0) } else { format!("({} edits)", hows.len()) };
+    Ok((format!("edited {} {how}{}", p.display(), id.map(|i| format!(" (undo: /rollback {i})")).unwrap_or_default()), before, text))
 }
 
 // ---------- checkpoints ----------
@@ -137,6 +150,31 @@ pub fn checkpoint(home: &Path, p: &Path) -> Option<u64> {
     }
     save_index(home, &v);
     Some(id)
+}
+
+/// The newest checkpoint number (0 when there is none).
+#[cfg_attr(not(feature = "code"), allow(dead_code))]
+pub fn last_checkpoint(home: &Path) -> u64 {
+    index(home).last().map(|s| s.id).unwrap_or(0)
+}
+
+/// Put every file back as it was before checkpoint `since + 1` (newest first, so a
+/// file changed twice ends up as it was before the first change).
+#[cfg_attr(not(feature = "code"), allow(dead_code))]
+pub fn restore_since(home: &Path, since: u64) -> Result<Vec<String>, String> {
+    let snaps: Vec<Snap> = index(home).into_iter().filter(|s| s.id > since).collect();
+    let mut first: Vec<Snap> = Vec::new();
+    for s in snaps {
+        if !first.iter().any(|f| f.path == s.path) {
+            first.push(s); // the oldest snapshot of each file this turn = how it was before
+        }
+    }
+    let mut done = Vec::new();
+    for s in first {
+        rollback(home, &s.id.to_string())?;
+        done.push(format!("{} {}", if s.existed { "restored" } else { "removed (it was new)" }, s.path));
+    }
+    Ok(done)
 }
 
 /// `/rollback`: list checkpoints; `/rollback <n>`: restore one.

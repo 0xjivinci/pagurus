@@ -9,6 +9,9 @@ use crate::tui;
 static MD: std::sync::Mutex<Option<tui::Md>> = std::sync::Mutex::new(None);
 #[cfg(all(feature = "tui", unix))]
 static LAST_STREAMED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Newlines in a row at the end of what streamed (to keep blank lines single).
+#[cfg(all(feature = "tui", unix))]
+static NEWLINES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(1);
 #[cfg(all(feature = "tui", unix))]
 static RICH: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -46,8 +49,22 @@ pub fn start() -> bool {
                 return;
             }
             tui::spinner_stop();
-            let out = md.get_or_insert_with(Default::default).push(t);
+            let mut out = md.get_or_insert_with(Default::default).push(t);
             drop(md);
+            // at most one blank line in a row
+            let mut kept = String::with_capacity(out.len());
+            for c in out.chars() {
+                if c == '\n' {
+                    let n = NEWLINES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    if n >= 2 {
+                        continue;
+                    }
+                } else if !c.is_whitespace() && c != '\x1b' {
+                    NEWLINES.store(0, std::sync::atomic::Ordering::Relaxed);
+                }
+                kept.push(c);
+            }
+            out = kept;
             print!("{out}");
             let _ = std::io::Write::flush(&mut std::io::stdout());
         })));
@@ -80,8 +97,13 @@ pub fn reply_done() -> bool {
         let shown = MD.lock().ok().and_then(|mut m| m.take());
         let streamed = shown.is_some();
         if let Some(mut m) = shown {
-            println!("{}", m.finish().trim_end_matches('\n'));
+            let tail = m.finish();
+            let tail = tail.trim_end_matches('\n');
+            if !tail.is_empty() || NEWLINES.load(std::sync::atomic::Ordering::Relaxed) == 0 {
+                println!("{tail}");
+            }
         }
+        NEWLINES.store(1, std::sync::atomic::Ordering::Relaxed); // the next reply starts on a fresh line
         LAST_STREAMED.store(streamed, std::sync::atomic::Ordering::Relaxed);
         streamed
     }

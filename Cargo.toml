@@ -36,8 +36,10 @@ art = []
 # The rich terminal chat: streaming answers, a line editor with history and completion,
 # live tool progress, a status line, Ctrl-C to stop (Linux and macOS).
 tui = ["dep:libc"]
+# Coding: project mode with grep, glob, check (tests/build/lint) and a hardened git tool.
+code = []
 # "uge": the big build for laptops and servers: every optional feature.
-uge = ["sqlite", "art", "tui"]
+uge = ["sqlite", "art", "tui", "code"]
 # The older name for the big build.
 full = ["uge"]
 

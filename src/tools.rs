@@ -53,13 +53,15 @@ pub fn definitions(cfg: &Config, set: Set) -> Value {
         v.push(def(
             "edit_file",
             "Change part of a text file: replace old_string (copied from read_file, unique in the file; small whitespace \
-             differences are tolerated) with new_string. Prefer it to rewriting whole files. The user can undo edits with /rollback.",
+             differences are tolerated) with new_string. Prefer it to rewriting whole files. Undo: /rollback.",
             json!({"type":"object","properties":{
                 "path":{"type":"string"},
                 "old_string":{"type":"string"},
                 "new_string":{"type":"string"},
-                "replace_all":{"type":"boolean","description":"replace every occurrence (default false)"}},
-              "required":["path","old_string","new_string"]}),
+                "replace_all":{"type":"boolean","description":"replace every occurrence (default false)"},
+                "edits":{"type":"array","description":"several changes at once (all or none)",
+                    "items":{"type":"object","properties":{"old_string":{"type":"string"},"new_string":{"type":"string"}}}}},
+              "required":["path"]}),
         ));
         v.push(def(
             "list_dir",
@@ -299,6 +301,8 @@ pub fn definitions(cfg: &Config, set: Set) -> Value {
     ));
     if set != Set::Review {
         v.extend(crate::mcp::definitions(cfg));
+        #[cfg(feature = "code")]
+        v.extend(crate::code::definitions());
     }
     Value::Array(v)
 }
@@ -308,6 +312,8 @@ pub fn parallel_safe(ctx: &Ctx, name: &str, raw: &str) -> bool {
     let a: Value = serde_json::from_str(raw).unwrap_or_default();
     match name {
         "read_file" | "list_dir" | "session_search" | "skill_view" => true,
+        #[cfg(feature = "code")]
+        "grep" | "glob" => true,
         "web_fetch" | "web_search" | "art" => ctx.cfg.tools.web,
         "shell" => {
             ctx.cfg.tools.shell != "off"
@@ -424,6 +430,10 @@ fn opt(a: &Value, k: &str) -> Option<String> {
 }
 
 fn dispatch(ctx: &Ctx, name: &str, a: &Value) -> Result<String, String> {
+    #[cfg(feature = "code")]
+    if let Some(r) = crate::code::run(ctx, name, a) {
+        return r;
+    }
     match name {
         "read_file" => read_file(ctx, a),
         "write_file" => {
@@ -435,8 +445,12 @@ fn dispatch(ctx: &Ctx, name: &str, a: &Value) -> Result<String, String> {
             if let Some(d) = p.parent() {
                 std::fs::create_dir_all(d).map_err(|e| e.to_string())?;
             }
+            #[cfg(feature = "code")]
+            crate::code::check_fresh(&p)?;
             crate::files::checkpoint(ctx.home, &p);
             std::fs::write(&p, &content).map_err(|e| e.to_string())?;
+            #[cfg(feature = "code")]
+            crate::code::edited(&p);
             Ok(format!("wrote {} bytes to {}", content.len(), p.display()))
         }
         "list_dir" => {
@@ -464,7 +478,30 @@ fn dispatch(ctx: &Ctx, name: &str, a: &Value) -> Result<String, String> {
         }
         "edit_file" => {
             let p = resolve(ctx, &s(a, "path")?, true)?;
-            crate::files::edit(ctx.home, &p, &s(a, "old_string")?, &s(a, "new_string")?, a["replace_all"].as_bool().unwrap_or(false))
+            #[cfg(feature = "code")]
+            crate::code::check_fresh(&p)?;
+            let mut edits: Vec<(String, String, bool)> = a["edits"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|e| (e["old_string"].as_str().unwrap_or("").to_string(), e["new_string"].as_str().unwrap_or("").to_string(), e["replace_all"].as_bool().unwrap_or(false)))
+                .collect();
+            if let (Some(o), Some(n)) = (a["old_string"].as_str(), a["new_string"].as_str()) {
+                edits.insert(0, (o.to_string(), n.to_string(), a["replace_all"].as_bool().unwrap_or(false)));
+            }
+            if edits.is_empty() {
+                return Err("give old_string and new_string, or edits".into());
+            }
+            let (msg, before, after) = crate::files::edit_many(ctx.home, &p, &edits)?;
+            #[cfg(feature = "code")]
+            {
+                crate::code::edited(&p);
+                if crate::code::root().is_some() {
+                    return Ok(format!("{msg}\n{}", crate::code::diff(&before, &after)));
+                }
+            }
+            let _ = (before, after);
+            Ok(msg)
         }
         "clarify" => {
             let options: Vec<String> =
@@ -629,6 +666,8 @@ pub fn skill_index(home: &Path) -> Vec<(String, String)> {
 
 fn roots(ctx: &Ctx, write: bool) -> Vec<PathBuf> {
     let mut r = vec![ctx.home.join("workspace")];
+    #[cfg(feature = "code")]
+    r.extend(crate::code::root()); // project mode: the project is writable too
     r.extend(ctx.cfg.tools.write_roots.iter().map(|p| expand(p)));
     if !write {
         r.extend(ctx.cfg.tools.read_roots.iter().map(|p| expand(p)));
@@ -640,7 +679,7 @@ fn roots(ctx: &Ctx, write: bool) -> Vec<PathBuf> {
 /// and require the result to live under an allowed root.
 fn resolve(ctx: &Ctx, p: &str, write: bool) -> Result<PathBuf, String> {
     let raw = expand(p);
-    let full = if raw.is_absolute() { raw } else { ctx.home.join("workspace").join(raw) };
+    let full = if raw.is_absolute() { raw } else { cwd(ctx).join(raw) };
     if full.components().any(|c| matches!(c, Component::ParentDir)) {
         return Err("`..` is not allowed in paths".into());
     }
@@ -681,7 +720,18 @@ fn read_file(ctx: &Ctx, a: &Value) -> Result<String, String> {
     let limit = a["limit"].as_u64().unwrap_or(400) as usize;
     let total = text.lines().count();
     let body: Vec<&str> = text.lines().skip(offset - 1).take(limit).collect();
-    let mut out = clip(&body.join("\n"), 16_000);
+    #[cfg(feature = "code")]
+    let numbered = crate::code::root().is_some_and(|r| p.starts_with(r));
+    #[cfg(not(feature = "code"))]
+    let numbered = false;
+    let mut out = if numbered {
+        #[cfg(feature = "code")]
+        crate::code::note_read(&p);
+        // like `cat -n`: the numbers are not part of the file
+        clip(&body.iter().enumerate().map(|(i, l)| format!("{:>5}\t{l}", offset + i)).collect::<Vec<_>>().join("\n"), 16_000)
+    } else {
+        clip(&body.join("\n"), 16_000)
+    };
     if offset - 1 + body.len() < total {
         out += &format!("\n[lines {}-{} of {total}; use offset to read more]", offset, offset - 1 + body.len());
     }
@@ -1227,6 +1277,27 @@ pub(crate) fn has_glob(w: &str) -> bool {
 }
 
 /// Shell-style wildcard match (`*`, `?`, `[a-z]`, `[!x]`) (leading dots: see `expand_glob`).
+/// Where relative paths and the shell start: the open project, else the workspace.
+pub(crate) fn cwd(ctx: &Ctx) -> PathBuf {
+    #[cfg(feature = "code")]
+    if let Some(r) = crate::code::root() {
+        return r;
+    }
+    ctx.home.join("workspace")
+}
+
+/// A shell command in `cwd` with a time limit (output and exit code as text).
+#[cfg_attr(not(feature = "code"), allow(dead_code))]
+pub(crate) fn run_shell(cmd: &str, cwd: &Path, timeout: u64) -> Result<String, String> {
+    run(cmd, cwd, timeout)
+}
+
+/// `*` and `?` wildcards (and `[…]`) against one name.
+#[cfg_attr(not(feature = "code"), allow(dead_code))]
+pub(crate) fn wildcard(pattern: &str, name: &str) -> bool {
+    wild(&pattern.chars().collect::<Vec<_>>(), &name.chars().collect::<Vec<_>>())
+}
+
 fn wild(p: &[char], s: &[char]) -> bool {
     match p.first() {
         None => s.is_empty(),
@@ -1460,7 +1531,7 @@ fn not_approved() -> String {
 
 /// The safety floor (crate::floor): blocked whoever approves, and recorded.
 pub(crate) fn above_floor(ctx: &Ctx, cmd: &str) -> Result<(), String> {
-    match crate::floor::check(ctx.home, &ctx.cfg.tools.shell_deny, cmd) {
+    match crate::floor::check_in(ctx.home, &cwd(ctx), &ctx.cfg.tools.shell_deny, cmd) {
         Some(why) => {
             crate::autonomy::audit(ctx.home, "blocked", cmd);
             Err(crate::floor::refusal(&why))
@@ -1498,7 +1569,7 @@ fn shell(ctx: &Ctx, cmd: &str) -> Result<String, String> {
         Some(_) if auto_allowed(ctx.home, t, cmd) => crate::autonomy::audit(ctx.home, "auto", cmd),
         Some(why) => approve(ctx, &why, cmd)?,
     }
-    run(cmd, &ctx.home.join("workspace"), t.shell_timeout_secs)
+    run(cmd, &cwd(ctx), t.shell_timeout_secs)
 }
 
 /// The platform shell: `sh` with its own process group (so a timeout can kill

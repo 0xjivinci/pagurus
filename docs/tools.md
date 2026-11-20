@@ -22,6 +22,25 @@
 | `memory` · `skill_propose` · `skill_view` | Its long-term memory and skills: see [Learning](learning.md). |
 | `mcp_<server>_<tool>` | Tools from MCP servers you connect: see [MCP](#mcp). Each call asks you first unless you mark the tool read-only. |
 
+## Coding (full build)
+
+`pagurus code` in a project folder (or `/project ~/code/app` in a chat) points pagurus at one code base:
+
+- File tools may write there, and relative paths and the shell start there. `read_file` shows line numbers.
+- **Four more tools:** `grep` (ripgrep, else grep), `glob` (`src/**/*.rs`), `check` (the project's tests, build or
+  lint, found from `Cargo.toml`, `package.json`, `go.mod`, `pyproject.toml` or a `Makefile`) and `git` (status, diff,
+  log, show, and commits on its own `agent/…` branch; it never pushes).
+- **Edits are careful:** `edit_file` takes several changes at once (all or none) and shows a diff. It refuses to edit
+  a file that wasn't read, or that changed since it was read.
+- **It tests its work:** an answer that changed code without running `check` is sent back once to run it.
+- **The project's rules:** `AGENTS.md` (else `CLAUDE.md`, `.cursorrules` …) joins the system prompt.
+- **Undo:** `/revert` puts back every file the last answer changed; `/rollback` still restores single files.
+- A coding answer may take up to 60 steps and 30 minutes.
+- **Approvals:** `check` runs the project's code, so it asks first. With `autonomy = "auto"` the project's usual
+  test, build and lint commands run unasked, and yolo covers everything above the floor. A commit always asks, unless yolo
+  is on. git runs with the repository's hooks, fsmonitor, pagers, external diff tools and credential helpers switched
+  off, so a hostile repository can't run code through it.
+
 ## Approvals, the safety floor and yolo
 
 Every command pagurus wants to run is decided in one of these ways, and each decision is written to
