@@ -10,8 +10,15 @@ use std::path::{Component, Path, PathBuf};
 /// Why `cmd` is below the floor, or None. `deny` is the user's own list
 /// (`tools.shell_deny`), matched like allowlist entries: a command name,
 /// optionally with the subcommand (`git push`).
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn check(home: &Path, deny: &[String], cmd: &str) -> Option<String> {
-    let f = Floor::new(home);
+    check_in(home, &home.join("workspace"), deny, cmd)
+}
+
+/// The same, for commands that run in `cwd` (a project folder).
+pub fn check_in(home: &Path, cwd: &Path, deny: &[String], cmd: &str) -> Option<String> {
+    let mut f = Floor::new(home);
+    f.cwd = lexical(cwd);
     let cmd = &cmd.replace("${HOME}", "$HOME"); // braces are separators below
     let segs = split(cmd);
     let compact: String = cmd.chars().filter(|c| !c.is_whitespace()).collect();
@@ -202,8 +209,11 @@ impl Floor {
         if self.user_home.as_deref().is_some_and(|h| h.starts_with(p) || under(h)) {
             return Some("your home folder or a folder directly in it");
         }
-        if self.home.starts_with(p) || p == self.cwd {
+        if self.home.starts_with(p) {
             return Some("pagurus's home");
+        }
+        if p == self.cwd {
+            return Some("the folder pagurus works in (the workspace or the open project)");
         }
         None
     }

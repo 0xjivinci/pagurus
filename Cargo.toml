@@ -34,8 +34,10 @@ sqlite = ["dep:rusqlite"]
 # The rich terminal chat: streaming answers, a line editor with history and completion,
 # live tool progress, a status line, Ctrl-C to stop (Linux and macOS).
 tui = ["dep:libc"]
+# Coding: project mode with grep, glob, check (tests/build/lint) and a hardened git tool.
+code = []
 # "pagurus full": every optional feature. Other features join this list.
-full = ["sqlite", "tui"]
+full = ["sqlite", "tui", "code"]
 
 [profile.release]
 opt-level = "z"

@@ -4,6 +4,8 @@ mod autonomy;
 mod board;
 mod bundled;
 mod channel;
+#[cfg(feature = "code")]
+mod code;
 mod config;
 mod daemon;
 mod eval;
@@ -38,6 +40,7 @@ usage:
   pagurus setup                 guided setup: model, key, Telegram, service
   pagurus init                  create ~/.pagurus (or $PAGURUS_HOME) non-interactively
   pagurus [chat]                interactive session
+  pagurus code [folder]         (full build) chat about a code base: edit it, search it, run its tests, use git
   pagurus run [--yolo[=30m]] <prompt…>   one-shot (also reads the prompt from stdin); --yolo: no approvals
   pagurus audit [all]           commands that ran and who decided (you, auto, yolo, blocked …)
   pagurus daemon                heartbeat + chat gateway: Telegram, Discord, Slack, email (the background service)
@@ -89,6 +92,12 @@ fn run(args: &[String]) -> Result<(), String> {
         }
         "import" => import::run(&home, &config::load(&home)?, &args[1..]),
         "chat" => agent::repl(home.clone(), config::load(&home)?),
+        #[cfg(feature = "code")]
+        "code" => {
+            let dir = args.get(1).cloned().unwrap_or_else(|| ".".into());
+            println!("{}", code::open(&home, &dir)?);
+            agent::repl(home.clone(), config::load(&home)?)
+        }
         "audit" => {
             println!("{}", autonomy::report(&home, args.get(1).is_some_and(|a| a == "all"), 40));
             Ok(())

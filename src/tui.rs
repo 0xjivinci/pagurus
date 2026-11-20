@@ -632,7 +632,10 @@ pub fn tool_start(name: &str, args: &str, parallel: bool) {
 /// The argument people care about: the command, the path, the query.
 fn tool_summary(name: &str, args: &str) -> String {
     let v: serde_json::Value = serde_json::from_str(args).unwrap_or_default();
-    for k in ["command", "path", "query", "url", "task", "name", "action", "question"] {
+    if v.as_object().is_some_and(|o| o.is_empty()) {
+        return String::new();
+    }
+    for k in ["command", "path", "pattern", "query", "url", "task", "name", "action", "what", "question"] {
         if let Some(s) = v[k].as_str() {
             let extra = if name == "shell" { v["host"].as_str().map(|h| format!("  (on {h})")).unwrap_or_default() } else { String::new() };
             return format!("{s}{extra}");
