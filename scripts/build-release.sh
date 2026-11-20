@@ -6,7 +6,7 @@
 set -eu
 cd "$(dirname "$0")/.."
 BUDGET=3670016      # 3.5 MiB: the small build must stay tiny (x86_64 is the largest)
-FULL_BUDGET=6291456 # 6 MiB: "pagurus full" (--features full: SQLite FTS5, …)
+FULL_BUDGET=10485760 # 10 MiB: "pagurus uge" (--features uge: SQLite FTS5, the art tool, …)
 rm -rf dist && mkdir -p dist
 
 musl() { # image target output [features]
