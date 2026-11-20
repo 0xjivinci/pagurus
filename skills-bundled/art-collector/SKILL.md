@@ -15,7 +15,7 @@ Match the request to the right search, and offer the others:
 - busy right now: action=trending (days=7, or 30; sort=volume for money)
 - quiet or overlooked (sold before, silent now): action=quiet
 - new names: action=new · a style: action=style, tag=generative/pixelart/photography…
-- "like X": action=similar, who=X (shared collectors)
+- "like X" or "collected by the same people as X": action=similar, who=X (one call; don't piece it together from holdings)
 - a name they half remember: action=search
 Present a short list with what stands out, say it's activity, not quality (mostly resales can be hype), ask what they
 like, then look a few up with action=artist.

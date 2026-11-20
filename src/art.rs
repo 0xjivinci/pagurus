@@ -182,6 +182,12 @@ pub fn resolve(who: &str) -> Result<Who, String> {
     if is_eth(who) {
         return Err(ETH_LATER.into());
     }
+    if ["tz1", "tz2", "tz3", "tz4", "KT1"].iter().any(|p| who.starts_with(p)) && who.len() >= 20 && !who.contains(' ') && !is_tez_address(who) {
+        return Err(format!(
+            "`{who}` isn't a valid Tezos address ({} characters; real ones have 36): copy the address exactly from an earlier result",
+            who.chars().count()
+        ));
+    }
     let (filter, val) = if is_tez_address(who) {
         ("address: {_eq: $v}", who.to_string())
     } else if who.ends_with(".tez") {
@@ -766,7 +772,8 @@ pub fn tool_definition() -> Value {
         "name": "art",
         "description": "Read-only crypto-art research (Tezos/objkt; Ethereum/OpenSea with chain=ethereum or 0x… targets): artists, works, sales, royalties, collectors, a wallet's \
             collection, and checks before buying (provenance, edition, red flags). Discover: trending, quiet (sold before, silent \
-            now), new, style (tag), similar (shared collectors), search (names). look = see a piece's image yourself. Never buys. Not financial advice. action=watch sets a free alert: kind new|sold (who) or ask (piece, below).",
+            now), new, style (tag), similar (\"collected by the same people as X\", \"artists like X\": one call), search \
+            (names). look = see a piece's image yourself. Never buys. Not financial advice. action=watch sets a free alert: kind new|sold (who) or ask (piece, below).",
         "parameters": { "type": "object", "properties": {
             "action": { "type": "string", "enum": ["trending", "quiet", "new", "style", "similar", "search", "artist", "works", "piece", "collection", "look", "sales", "collectors", "holdings", "watch"] },
             "chain": { "type": "string", "enum": ["tezos", "ethereum"] },
