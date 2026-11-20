@@ -1067,6 +1067,12 @@ pub fn run(home: PathBuf, cfg: Config) -> Result<(), String> {
         })
     };
     crate::board::spawn(home.clone(), cfg.clone(), hooks.clone());
+    #[cfg(feature = "art")]
+    match crate::art_dash::serve(home.clone(), &cfg.art.dashboard) {
+        Ok(Some(a)) => eprintln!("pagurus: art dashboard on http://{a}"),
+        Ok(None) => {}
+        Err(e) => eprintln!("pagurus: art dashboard not started: {e}"),
+    }
     if let Some(addr) = crate::peer::serve(home.clone(), cfg.clone(), hooks)? {
         eprintln!("pagurus: accepting tasks from paired pagurus agents on {addr} as `{}`", crate::peer::self_name(&cfg));
     }

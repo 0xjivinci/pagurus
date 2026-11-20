@@ -220,14 +220,14 @@ fn authenticate(home: &Path, h: &Headers, method: &str, path: &str, body: &[u8])
 
 type Headers = Vec<(String, String)>;
 
-struct Request {
-    method: String,
-    path: String,
-    headers: Headers,
-    body: Vec<u8>,
+pub(crate) struct Request {
+    pub method: String,
+    pub path: String,
+    pub headers: Headers,
+    pub body: Vec<u8>,
 }
 
-fn read_request(r: &mut impl BufRead) -> Result<Request, (u16, String)> {
+pub(crate) fn read_request(r: &mut impl BufRead) -> Result<Request, (u16, String)> {
     let bad = |m: &str| (400, m.to_string());
     let mut head = r.take(8 * 1024);
     let mut line = String::new();

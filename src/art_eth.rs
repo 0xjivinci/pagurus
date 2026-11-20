@@ -564,6 +564,31 @@ pub fn meta(home: &Path, spec: &str) -> Result<Value, String> {
     }))
 }
 
+/// A wallet's NFTs (newest first), in the shape of `art_taste::meta`.
+pub fn account_nfts(home: &Path, addr: &str, n: usize) -> Result<Vec<Value>, String> {
+    let mut note = None;
+    let d = get(home, &format!("/chain/ethereum/account/{addr}/nfts?limit={}", n.clamp(1, 200)), &mut note)?;
+    Ok(d.map(|d| {
+        d["nfts"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|t| {
+                let (c, id) = (t["contract"].as_str().unwrap_or(""), t["identifier"].as_str().unwrap_or(""));
+                json!({
+                    "chain": "ethereum", "piece": format!("{c}/{id}"),
+                    "title": t["name"].as_str().filter(|s| !s.is_empty()).map(String::from).unwrap_or_else(|| format!("#{id}")),
+                    "artist": "", "artist_name": t["collection"].as_str().unwrap_or(""),
+                    "price": Value::Null, "currency": "ETH",
+                    "image": t["display_image_url"].as_str().or(t["image_url"].as_str()).unwrap_or(""),
+                    "url": item_url(c, id),
+                })
+            })
+            .collect()
+    })
+    .unwrap_or_default())
+}
+
 /// ETH a wallet spent buying since `after` (unix time).
 pub fn spent_since(home: &Path, addr: &str, after: u64) -> Result<f64, String> {
     let mut note = None;

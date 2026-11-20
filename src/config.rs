@@ -599,6 +599,7 @@ results = 6
 # weekly_budget_xtz = 100
 # weekly_budget_eth = 0.1
 # picks_per_week = 5
+# dashboard = "127.0.0.1:7720" # the art dashboard, served by the daemon on this machine only ("off" to switch off)
 
 [daemon]
 heartbeat_minutes = 60         # 0 disables HEARTBEAT.md checks

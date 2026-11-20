@@ -7,6 +7,8 @@ mod art_eth;
 mod art_find;
 #[cfg(feature = "art")]
 mod art_taste;
+#[cfg(feature = "art")]
+mod art_dash;
 mod ask;
 mod autonomy;
 mod board;
@@ -64,6 +66,7 @@ usage:
   pagurus peer [list | pair | add <name> <url> <code> | remove <name> | ask <name> <task…>]
                                pagurus agents on other devices that hand each other tasks
   pagurus host [list | test <name>]   machines the shell tool reaches over ssh / try one
+  pagurus dashboard             (uge) the art dashboard on http://127.0.0.1:7720 (the daemon serves it too)
   pagurus doctor                check config, budgets and footprint
 ";
 
@@ -88,6 +91,8 @@ fn run(args: &[String]) -> Result<(), String> {
         "eval" => eval::run(&home, &args[1..]),
         #[cfg(feature = "art")]
         "art" => art::cli(&args[1..]).map(|out| println!("{}", out.trim_end())),
+        #[cfg(feature = "art")]
+        "dashboard" => art_dash::cli(&home).map(|out| println!("{out}")),
         "service" => setup::service_cmd(&home, &args[1..]),
         "model" => {
             let (msg, _) = config::model_command(&home, &config::load(&home)?, &args[1..].join(" "))?;

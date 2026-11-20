@@ -22,11 +22,13 @@ pub struct ArtCfg {
     pub weekly_budget_eth: f64,
     /// How many picks a weekly proposal round makes.
     pub picks_per_week: u32,
+    /// Where the daemon serves the art dashboard (this machine only); "off" to switch it off.
+    pub dashboard: String,
 }
 
 impl Default for ArtCfg {
     fn default() -> Self {
-        Self { wallets: vec![], weekly_budget_xtz: 0.0, weekly_budget_eth: 0.0, picks_per_week: 5 }
+        Self { wallets: vec![], weekly_budget_xtz: 0.0, weekly_budget_eth: 0.0, picks_per_week: 5, dashboard: "127.0.0.1:7720".into() }
     }
 }
 
@@ -374,6 +376,37 @@ pub fn weekly(home: &Path, day: Option<&str>, at: Option<&str>) -> Result<String
         None,
         Some(crate::tasks::Cal { weekday: Some(weekday), minute }),
     )
+}
+
+/// What the user's wallets hold, newest first, in the same shape as `meta`.
+pub fn collection(home: &Path) -> Result<Vec<Value>, String> {
+    let cfg = crate::config::load(home).map(|c| c.art).unwrap_or_default();
+    let tz: Vec<&String> = cfg.wallets.iter().filter(|w| crate::art::is_tez_address(w)).collect();
+    let mut out = Vec::new();
+    if !tz.is_empty() {
+        let q = "query($a: [String!]!) { token_holder(where: {holder_address: {_in: $a}, quantity: {_gt: 0}, token: {decimals: {_eq: 0}}}, \
+                 order_by: {last_incremented_at: desc}, limit: 120) { quantity token { name token_id fa_contract lowest_ask display_uri \
+                 thumbnail_uri creators { creator_address holder { alias tzdomain } } } } }";
+        for r in crate::art::gql(q, json!({ "a": tz }))?["token_holder"].as_array().into_iter().flatten() {
+            let t = &r["token"];
+            let (c, id) = (t["fa_contract"].as_str().unwrap_or(""), t["token_id"].as_str().unwrap_or(""));
+            let addr = t["creators"][0]["creator_address"].as_str().unwrap_or("");
+            let uri = t["display_uri"].as_str().filter(|s| !s.is_empty()).or(t["thumbnail_uri"].as_str()).unwrap_or("");
+            out.push(json!({
+                "chain": "tezos", "piece": format!("{c}/{id}"),
+                "title": t["name"].as_str().filter(|s| !s.is_empty()).unwrap_or("(untitled)"),
+                "artist": addr, "artist_name": crate::art::holder_label(&t["creators"][0]["holder"], addr),
+                "price": crate::art::num(&t["lowest_ask"]).map(|m| m as f64 / 1e6), "currency": "tez",
+                "quantity": crate::art::num(&r["quantity"]),
+                "image": crate::art::image_urls(uri).into_iter().next().unwrap_or_default(),
+                "url": format!("https://objkt.com/tokens/{c}/{id}"),
+            }));
+        }
+    }
+    for w in cfg.wallets.iter().filter(|w| crate::art_eth::is_address(w)) {
+        out.extend(crate::art_eth::account_nfts(home, w, 60)?);
+    }
+    Ok(out)
 }
 
 /// Everything the dashboard shows.

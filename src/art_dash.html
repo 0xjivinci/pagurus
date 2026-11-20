@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="pagurus-token" content="{{TOKEN}}">
+<title>pagurus · art</title>
+<style>
+:root{--bg:#fafafa;--card:#fff;--fg:#111;--mut:#6b6b6b;--line:#e4e4e4;--soft:#f1f1f1;--acc:#111;--acc-fg:#fff;--warn:#a33}
+@media (prefers-color-scheme:dark){:root{--bg:#0b0b0b;--card:#141414;--fg:#ededed;--mut:#8e8e8e;--line:#262626;--soft:#1c1c1c;--acc:#ededed;--acc-fg:#0b0b0b;--warn:#e07070}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 ui-sans-serif,-apple-system,"Inter","Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+a{color:inherit}
+header{position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.bar{max-width:1180px;margin:0 auto;padding:14px 20px;display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+.brand{font:600 13px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.14em}
+.brand span{color:var(--mut);font-weight:400}
+nav{display:flex;gap:2px;background:var(--soft);padding:3px;border-radius:9px}
+nav button{border:0;background:none;color:var(--mut);font:inherit;font-size:13px;padding:6px 12px;border-radius:7px;cursor:pointer}
+nav button.on{background:var(--card);color:var(--fg);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.budget{margin-left:auto;font-size:12.5px;color:var(--mut);display:flex;align-items:center;gap:10px}
+.meter{width:120px;height:5px;background:var(--soft);border-radius:3px;overflow:hidden}
+.meter i{display:block;height:100%;background:var(--acc);width:0}
+main{max-width:1180px;margin:0 auto;padding:28px 16px 60px;overflow-wrap:anywhere}
+html,body{overflow-x:hidden}
+h2{font-size:15px;font-weight:600;margin:0 0 4px}
+.sub{color:var(--mut);font-size:13px;margin:0 0 20px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(250px,100%),1fr));gap:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden;display:flex;flex-direction:column;min-width:0}
+.img{aspect-ratio:1;background:var(--soft);display:flex;align-items:center;justify-content:center;overflow:hidden}
+.img img{width:100%;height:100%;object-fit:cover;display:block}
+.img .none{color:var(--mut);font-size:12px}
+.body{padding:12px 14px 14px;display:flex;flex-direction:column;gap:6px;flex:1}
+.t{font-weight:600;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.a{color:var(--mut);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row{display:flex;align-items:center;gap:8px;font-size:12.5px}
+.price{font-variant-numeric:tabular-nums;font-weight:500}
+.chip{font-size:11px;border:1px solid var(--line);border-radius:999px;padding:1px 8px;color:var(--mut)}
+.why{font-size:12.5px;color:var(--fg);opacity:.85;margin:2px 0}
+.fit{display:inline-flex;gap:2px}.fit i{width:6px;height:6px;border-radius:2px;background:var(--line)}.fit i.on{background:var(--acc)}
+.acts{display:flex;gap:6px;margin-top:auto;padding-top:6px}
+.acts button{flex:1;border:1px solid var(--line);background:var(--card);color:var(--fg);font:inherit;font-size:12px;padding:6px 0;border-radius:8px;cursor:pointer}
+.acts button:hover{border-color:var(--fg)}
+.acts button.sel{background:var(--acc);color:var(--acc-fg);border-color:var(--acc)}
+.empty{border:1px dashed var(--line);border-radius:12px;padding:40px 20px;text-align:center;color:var(--mut)}
+.empty code{background:var(--soft);padding:1px 6px;border-radius:5px;font-size:12.5px}
+.cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px}
+@media (max-width:760px){.cols{grid-template-columns:1fr}.budget{margin-left:0;width:100%}}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px}
+.taste{white-space:pre-wrap;font-size:13.5px}
+ul.list{list-style:none;margin:0;padding:0}
+ul.list li{display:flex;gap:10px;align-items:baseline;padding:8px 0;border-top:1px solid var(--line);font-size:13px}
+ul.list li:first-child{border-top:0}
+.v{font:600 10.5px/1 ui-monospace,monospace;text-transform:uppercase;letter-spacing:.06em;padding:4px 6px;border-radius:5px;background:var(--soft);min-width:42px;text-align:center}
+.v.love,.v.yolo{background:var(--acc);color:var(--acc-fg)}
+.v.blocked,.v.denied{color:var(--warn)}
+.when{color:var(--mut);font-size:12px;margin-left:auto;white-space:nowrap}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--acc);color:var(--acc-fg);padding:9px 16px;border-radius:9px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90vw}
+.toast.on{opacity:1}
+.foot{color:var(--mut);font-size:12px;margin-top:34px;text-align:center}
+</style>
+</head>
+<body>
+<header><div class="bar">
+  <div class="brand">PAGURUS <span>/ art</span></div>
+  <nav id="tabs"></nav>
+  <div class="budget"><span id="btext">budget…</span><div class="meter"><i id="bfill"></i></div></div>
+</div></header>
+<main id="main"></main>
+<div class="toast" id="toast"></div>
+<script>
+const TOKEN=document.querySelector('meta[name=pagurus-token]').content;
+const TABS=[["week","This week"],["wish","Wishlist"],["coll","Collection"],["taste","Taste"],["act","Activity"]];
+let DATA=null,TAB=(()=>{try{return localStorage.getItem("tab")||"week"}catch(e){return "week"}})();
+const $=s=>document.querySelector(s);
+function h(tag,attrs,...kids){const e=document.createElement(tag);for(const[k,v]of Object.entries(attrs||{})){if(k==="class")e.className=v;else if(k.startsWith("on"))e.addEventListener(k.slice(2),v);else if(v!=null)e.setAttribute(k,v)}for(const k of kids.flat()){if(k==null||k===false)continue;e.append(k.nodeType?k:document.createTextNode(String(k)))}return e}
+async function api(path,body){const r=await fetch(path,{method:body?"POST":"GET",headers:{"X-Pagurus":TOKEN,"Content-Type":"application/json"},body:body?JSON.stringify(body):undefined});const j=await r.json().catch(()=>({error:"bad answer"}));if(!r.ok)throw new Error(j.error||r.statusText);return j}
+function toast(t){const e=$("#toast");e.textContent=t;e.classList.add("on");clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove("on"),2600)}
+function ago(t){const s=Date.now()/1000-t;if(s<90)return"just now";if(s<5400)return Math.round(s/60)+"m ago";if(s<129600)return Math.round(s/3600)+"h ago";return Math.round(s/86400)+"d ago"}
+function price(m){return m.price==null?"not listed":`${+m.price.toFixed(4)} ${m.currency||""}`}
+function img(m){const box=h("div",{class:"img"});if(m.image){const i=h("img",{src:m.image,loading:"lazy",referrerpolicy:"no-referrer",alt:m.title||""});i.onerror=()=>{box.replaceChildren(h("span",{class:"none"},"no preview"))};box.append(i)}else box.append(h("span",{class:"none"},"no preview"));return h("a",{href:m.url,target:"_blank",rel:"noopener"},box)}
+function rated(piece){const r=(DATA.ratings||[]).find(x=>x.meta&&x.meta.piece===piece);return r&&r.verdict}
+function rateButtons(m){const cur=rated(m.piece);return h("div",{class:"acts"},...[["love","Love"],["like","Like"],["pass","Pass"]].map(([v,l])=>h("button",{class:cur===v?"sel":"",title:`Tell pagurus you ${v==="pass"?"pass on":v} this`,onclick:async e=>{e.target.disabled=true;try{await api("/api/rate",{piece:m.piece,verdict:v});toast(`Noted: ${v}. pagurus learns from this.`);await load()}catch(err){toast(err.message)}}},l)))}
+function card(m,extra){return h("div",{class:"card"},img(m),h("div",{class:"body"},h("div",{class:"t",title:m.title},m.title),h("div",{class:"a",title:m.artist_name},m.artist_name),h("div",{class:"row"},h("span",{class:"price"},price(m)),m.chain==="ethereum"?h("span",{class:"chip"},"ETH"):h("span",{class:"chip"},"Tezos"),m.quantity>1?h("span",{class:"chip"},"×"+m.quantity):null),...(extra||[])))}
+function empty(...kids){return h("div",{class:"empty"},...kids)}
+function fit(n){return h("span",{class:"fit",title:`fit ${n}/5`},...[1,2,3,4,5].map(i=>h("i",{class:i<=n?"on":""})))}
+const VIEWS={
+ week(){const p=DATA.proposals||[];const head=[h("h2",{},`Proposals · week of ${DATA.week}`),h("p",{class:"sub"},"Picks pagurus made for your taste and budget. Rate them: that teaches the next round. You buy in your own wallet.")];
+  if(!p.length)return[...head,empty("No proposals yet this week. Ask pagurus for “this week's art proposals”, or schedule them with ",h("code",{},"pagurus art weekly"),".")];
+  return[...head,h("div",{class:"grid"},p.map(x=>card(x.meta,[h("div",{class:"row"},fit(x.fit||3),h("span",{class:"chip"},x.status)),h("div",{class:"why"},x.why),rateButtons(x.meta),h("div",{class:"acts"},h("button",{onclick:async()=>{try{toast((await api("/api/wish",{piece:x.meta.piece})).text)}catch(e){toast(e.message)}}},"＋ Wishlist"),h("a",{href:x.meta.url,target:"_blank",rel:"noopener",style:"flex:1;text-align:center;font-size:12px;padding:6px 0;border:1px solid var(--line);border-radius:8px;text-decoration:none"},"Open ↗"))])))]},
+ wish(){const w=DATA.wishlist||[];const head=[h("h2",{},"Wishlist"),h("p",{class:"sub"},"Pieces you're keeping an eye on. Ask pagurus to watch one for a price drop.")];
+  if(!w.length)return[...head,empty("Empty. Tell pagurus “add this to my wishlist” with a link, or use ＋ Wishlist on a proposal.")];
+  return[...head,h("div",{class:"grid"},w.map(x=>card(x.meta,[x.note?h("div",{class:"why"},x.note):null,h("div",{class:"acts"},h("button",{onclick:async()=>{try{await api("/api/unwish",{piece:x.meta.piece});toast("Removed");await load()}catch(e){toast(e.message)}}},"Remove"))])))]},
+ coll(){const box=h("div",{},h("p",{class:"sub"},"Loading your wallets…"));const head=[h("h2",{},"Collection"),h("p",{class:"sub"},(DATA.wallets||[]).length?`From ${DATA.wallets.length} wallet(s). Lowest asks are asks, not a valuation.`:"")];
+  if(!(DATA.wallets||[]).length)return[...head,empty("Add your public addresses to ",h("code",{},"[art] wallets")," in config.toml to see your collection here.")];
+  api("/api/collection").then(j=>box.replaceChildren(j.items.length?h("div",{class:"grid"},j.items.map(m=>card(m,[rateButtons(m)]))):empty("Nothing found in these wallets."))).catch(e=>box.replaceChildren(empty(e.message)));return[...head,box]},
+ taste(){const r=DATA.ratings||[];return[h("h2",{},"Taste"),h("p",{class:"sub"},"What pagurus has learned from your ratings and collection. Edit art/taste.md if it's wrong."),
+  h("div",{class:"cols"},h("div",{class:"panel"},h("h2",{},"Profile"),h("div",{class:"taste"},DATA.taste&&DATA.taste.trim()?DATA.taste:"Not written yet. Rate a few pieces and pagurus will summarise what you like.")),
+  h("div",{class:"panel"},h("h2",{},`Ratings (${r.length})`),r.length?h("ul",{class:"list"},r.slice(0,40).map(x=>h("li",{},h("span",{class:"v "+x.verdict},x.verdict),h("a",{class:"mono",href:x.meta.url,target:"_blank",rel:"noopener",title:x.why||""},`${x.meta.title} · ${x.meta.artist_name}`),h("span",{class:"when"},ago(x.t))))):h("p",{class:"sub"},"No ratings yet.")))]},
+ act(){const box=h("div",{class:"panel"},h("p",{class:"sub"},"Loading…"));api("/api/activity").then(j=>box.replaceChildren(j.items.length?h("ul",{class:"list"},j.items.map(x=>h("li",{},h("span",{class:"v "+x.how},x.how),h("span",{class:"mono",title:x.cmd},x.cmd),h("span",{class:"when"},ago(x.t))))):h("p",{class:"sub"},"Nothing yet."))).catch(e=>box.replaceChildren(h("p",{class:"sub"},e.message)));
+  return[h("h2",{},"Activity"),h("p",{class:"sub"},"Every command pagurus ran or was refused, and who decided: you, yolo, auto, read-only or the safety floor."),box]}
+};
+function render(){$("#tabs").replaceChildren(...TABS.map(([k,l])=>h("button",{class:k===TAB?"on":"",onclick:()=>{TAB=k;try{localStorage.setItem("tab",k)}catch(e){}render()}},l)));$("#main").replaceChildren(...VIEWS[TAB](),h("div",{class:"foot"},"Read-only · not financial advice · nothing is bought for you"))}
+async function load(){try{DATA=await api("/api/data");render()}catch(e){$("#main").replaceChildren(empty("Couldn't load: "+e.message))}}
+async function budget(){try{const t=(await api("/api/budget")).text;const m=t.match(/Tezos ([\d.]+) of ([\d.]+) tez/);$("#btext").textContent=m?`${(+m[2]-+m[1]).toFixed(1)} of ${+m[2]} tez left this week`:"no weekly budget set";$("#bfill").style.width=m?Math.min(100,100*m[1]/m[2])+"%":"0";$("#btext").title=t}catch(e){$("#btext").textContent="budget unknown"}}
+load();budget();setInterval(load,60000);
+</script>
+</body>
+</html>
