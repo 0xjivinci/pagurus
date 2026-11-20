@@ -675,7 +675,7 @@ pub fn trending(days: u64, n: usize, by_volume: bool) -> Result<String, String> 
 
 /// ipfs://CID → image URLs to try in order: objkt's own CDN (fast, what objkt.com
 /// shows), then public IPFS gateways (which rate-limit under load); http(s) as is.
-fn image_urls(uri: &str) -> Vec<String> {
+pub(crate) fn image_urls(uri: &str) -> Vec<String> {
     match uri.strip_prefix("ipfs://") {
         Some(rest) if !rest.is_empty() => {
             let cid = rest.split('/').next().unwrap_or(rest);
@@ -773,9 +773,16 @@ pub fn tool_definition() -> Value {
         "description": "Read-only crypto-art research (Tezos/objkt; Ethereum/OpenSea with chain=ethereum or 0x… targets): artists, works, sales, royalties, collectors, a wallet's \
             collection, and checks before buying (provenance, edition, red flags). Discover: trending, quiet (sold before, silent \
             now), new, style (tag), similar (\"collected by the same people as X\", \"artists like X\": one call), search \
-            (names). look = see a piece's image yourself. Never buys. Not financial advice. action=watch sets a free alert: kind new|sold (who) or ask (piece, below).",
+            (names). look = see a piece's image yourself. Never buys. Not financial advice. action=watch sets a free alert: kind new|sold (who) or ask (piece, below). \
+            Taste: rate (piece, verdict love|like|pass, why) whenever the user reacts to a piece; taste (profile + evidence; note= rewrites it); \
+            wish/unwish/wishlist; propose (piece, why, fit 1-5) records a weekly pick within budget; proposals; budget; weekly schedules the round.",
         "parameters": { "type": "object", "properties": {
-            "action": { "type": "string", "enum": ["trending", "quiet", "new", "style", "similar", "search", "artist", "works", "piece", "collection", "look", "sales", "collectors", "holdings", "watch"] },
+            "action": { "type": "string", "enum": ["trending", "quiet", "new", "style", "similar", "search", "artist", "works", "piece", "collection", "look", "sales", "collectors", "holdings", "watch",
+                "rate", "taste", "wish", "unwish", "wishlist", "propose", "proposals", "budget", "weekly"] },
+            "verdict": { "type": "string", "enum": ["love", "like", "pass"] },
+            "why": { "type": "string", "description": "rate: the user's reason; propose: why it fits their taste" },
+            "note": { "type": "string" },
+            "fit": { "type": "integer", "description": "propose: 1-5" },
             "chain": { "type": "string", "enum": ["tezos", "ethereum"] },
             "who": { "type": "string", "description": "tz…/.tez/objkt name, or 0x…/OpenSea username" },
             "piece": { "type": "string", "description": "objkt/OpenSea link, KT1…/id or 0x…/id" },
@@ -793,6 +800,24 @@ pub fn tool_definition() -> Value {
 pub fn run_tool(home: &std::path::Path, a: &Value) -> Result<String, String> {
     let who = a["who"].as_str().unwrap_or("");
     let piece_arg = a["piece"].as_str().unwrap_or("");
+    {
+        use crate::art_taste as t;
+        let spec = if piece_arg.is_empty() { who } else { piece_arg };
+        let text = |k: &str| a[k].as_str().unwrap_or("");
+        let need = || if spec.is_empty() { Err("which piece? give piece= (objkt or OpenSea link, or contract/id)".to_string()) } else { Ok(spec) };
+        match a["action"].as_str().unwrap_or("") {
+            "rate" => return t::rate(home, need()?, text("verdict"), text("why")),
+            "taste" => return t::taste(home, a["note"].as_str()),
+            "wish" => return t::wish(home, need()?, text("note")),
+            "unwish" => return t::unwish(home, need()?),
+            "wishlist" => return Ok(t::wishlist(home)),
+            "propose" => return t::propose(home, need()?, text("why"), a["fit"].as_u64()),
+            "proposals" => return Ok(t::proposals(home)),
+            "budget" => return t::budget(home),
+            "weekly" => return t::weekly(home, a["day"].as_str(), a["at"].as_str()),
+            _ => {}
+        }
+    }
     let eth = a["chain"].as_str().is_some_and(|c| c.eq_ignore_ascii_case("ethereum") || c.eq_ignore_ascii_case("eth"))
         || crate::art_eth::looks_eth(who)
         || crate::art_eth::looks_eth(piece_arg);
@@ -915,6 +940,9 @@ pub const USAGE: &str = "usage: pagurus art trending [days] [n] [volume]
        pagurus art artist|works|sales|collectors|holdings <who> [n|days]
        pagurus art piece <objkt link | KT1…/id>
        pagurus art look <objkt link | KT1…/id>    fetch the preview image
+  your taste (also on Ethereum):
+       pagurus art rate <piece> love|like|pass [why] · taste · wish <piece> [note] · unwish <piece> · wishlist
+       pagurus art proposals · propose <piece> <fit 1-5> <why> · budget · weekly [day] [HH:MM]   (wallets and budget: [art] in config.toml)
   numbers for heartbeat checks (zero tokens):
        pagurus art new <artist> <minutes>     new works minted in the last N minutes
        pagurus art sold <artist> <minutes>    fixed-price sales in the last N minutes
@@ -924,6 +952,23 @@ pub const USAGE: &str = "usage: pagurus art trending [days] [n] [volume]
 
 pub fn cli(args: &[String]) -> Result<String, String> {
     let home = crate::util::home_dir();
+    {
+        use crate::art_taste as t;
+        let rest = || args[2.min(args.len())..].join(" ");
+        let piece = || args.get(1).map(String::as_str).unwrap_or("");
+        match args.first().map(String::as_str).unwrap_or("") {
+            "rate" => return t::rate(&home, piece(), args.get(2).map(String::as_str).unwrap_or(""), &args[3.min(args.len())..].join(" ")),
+            "taste" => return t::taste(&home, None),
+            "wish" => return t::wish(&home, piece(), &rest()),
+            "unwish" => return t::unwish(&home, piece()),
+            "wishlist" => return Ok(t::wishlist(&home)),
+            "proposals" => return Ok(t::proposals(&home)),
+            "propose" => return t::propose(&home, piece(), &args[3.min(args.len())..].join(" "), args.get(2).and_then(|f| f.parse().ok())),
+            "budget" => return t::budget(&home),
+            "weekly" => return t::weekly(&home, args.get(1).map(String::as_str), args.get(2).map(String::as_str)),
+            _ => {}
+        }
+    }
     let eth = args.iter().skip(1).any(|x| crate::art_eth::looks_eth(x)) || args.iter().any(|x| x == "--eth");
     let args: Vec<String> = args.iter().filter(|x| *x != "--eth").cloned().collect();
     let a = |i: usize| args.get(i).map(String::as_str).unwrap_or("");

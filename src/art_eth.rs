@@ -536,6 +536,52 @@ pub fn lowest_ask(home: &Path, spec: &str) -> Result<Option<f64>, String> {
     }))
 }
 
+/// The facts about a piece that taste, proposals and the dashboard need (see `art_taste::meta`).
+pub fn meta(home: &Path, spec: &str) -> Result<Value, String> {
+    let (c, id) = parse_piece(spec).ok_or("give the piece as an OpenSea link or 0x…/id")?;
+    let mut note = None;
+    let nft = must(home, &format!("/chain/ethereum/contract/{c}/nfts/{id}"), &format!("token {id} on {c}"), &mut note)?["nft"].clone();
+    let slug = nft["collection"].as_str().unwrap_or("").to_string();
+    let col = if slug.is_empty() { Value::Null } else { get(home, &format!("/collections/{slug}"), &mut note)?.unwrap_or(Value::Null) };
+    let creator = nft["creator"].as_str().or(col["owner"].as_str()).unwrap_or("").to_lowercase();
+    let ask = if slug.is_empty() {
+        None
+    } else {
+        get(home, &format!("/listings/collection/{slug}/nfts/{id}/best"), &mut note)?.map(|b| units(&b["price"]["current"]["value"], &b["price"]["current"]["decimals"]))
+    };
+    Ok(json!({
+        "chain": "ethereum",
+        "piece": format!("{c}/{id}"),
+        "title": nft["name"].as_str().filter(|s| !s.is_empty()).map(String::from).unwrap_or_else(|| format!("#{id}")),
+        "artist": creator,
+        "artist_name": col["name"].as_str().filter(|s| !s.is_empty()).map(String::from).unwrap_or_else(|| short(&creator)),
+        "editions": Value::Null,
+        "price": ask,
+        "currency": "ETH",
+        "image": nft["display_image_url"].as_str().or(nft["image_url"].as_str()).unwrap_or(""),
+        "tags": col["category"].as_str().into_iter().collect::<Vec<_>>(),
+        "url": item_url(&c, &id),
+    }))
+}
+
+/// ETH a wallet spent buying since `after` (unix time).
+pub fn spent_since(home: &Path, addr: &str, after: u64) -> Result<f64, String> {
+    let mut note = None;
+    let d = get(home, &format!("/events/accounts/{addr}?event_type=sale&after={after}&limit=100"), &mut note)?;
+    Ok(d.map(|d| {
+        d["asset_events"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|e| e["buyer"].as_str().is_some_and(|b| b.eq_ignore_ascii_case(addr)))
+            .filter(|e| matches!(e["payment"]["symbol"].as_str(), Some("ETH" | "WETH")))
+            .map(|e| units(&e["payment"]["quantity"], &e["payment"]["decimals"]))
+            .sum::<f64>()
+            + 0.0
+    })
+    .unwrap_or(0.0))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

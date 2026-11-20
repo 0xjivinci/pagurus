@@ -28,6 +28,9 @@ pub struct Config {
     pub board: BoardCfg,
     /// Other pagurus agents this one works with (`pagurus peer …`).
     pub peer: PeerCfg,
+    /// `[art]`: your wallets and weekly budget for art proposals (uge).
+    #[cfg(feature = "art")]
+    pub art: crate::art_taste::ArtCfg,
 }
 
 #[derive(Deserialize, Clone, Debug)]
@@ -590,6 +593,12 @@ web = true                     # web_search + web_fetch: find pages and read the
 provider = "auto"                # auto: Brave or Tavily if their key is in the env file, else SearXNG if set, else DuckDuckGo (no account)
 # searxng_url = "http://nas.local:8888"
 results = 6
+
+# [art]                        # uge build: your taste, wishlist and weekly art proposals
+# wallets = ["tz1…", "0x…"]    # your public addresses (never a seed phrase or private key)
+# weekly_budget_xtz = 100
+# weekly_budget_eth = 0.1
+# picks_per_week = 5
 
 [daemon]
 heartbeat_minutes = 60         # 0 disables HEARTBEAT.md checks

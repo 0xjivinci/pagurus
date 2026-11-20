@@ -20,6 +20,7 @@ pub const SKILLS: &[(&str, &str)] = &[
 pub const EXTRA: &[(&str, &str)] = &[
     ("art-collector", include_str!("../skills-bundled/art-collector/SKILL.md")),
     ("art-artist", include_str!("../skills-bundled/art-artist/SKILL.md")),
+    ("art-taste", include_str!("../skills-bundled/art-taste/SKILL.md")),
 ];
 #[cfg(not(feature = "art"))]
 pub const EXTRA: &[(&str, &str)] = &[];

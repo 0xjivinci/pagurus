@@ -5,6 +5,8 @@ mod art;
 mod art_eth;
 #[cfg(feature = "art")]
 mod art_find;
+#[cfg(feature = "art")]
+mod art_taste;
 mod ask;
 mod autonomy;
 mod board;
