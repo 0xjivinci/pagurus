@@ -23,6 +23,9 @@ mod skills;
 mod store;
 mod tasks;
 mod tools;
+#[cfg(all(feature = "tui", unix))]
+mod tui;
+mod ui;
 mod util;
 mod voice;
 

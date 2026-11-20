@@ -5,7 +5,7 @@ use crate::store::Session;
 use crate::tools::{self, Ctx, Set};
 use crate::util::{clip, fmt_time, now, one_line, read, tail};
 use std::collections::{HashMap, HashSet};
-use std::io::{BufRead, Write};
+use std::io::Write;
 use std::path::PathBuf;
 
 pub struct Agent {
@@ -179,8 +179,35 @@ impl Agent {
     }
 
     /// Use a new model setup from now on, keeping the conversation.
+    /// How full the conversation window is, against agent.context_chars.
+    pub fn context_percent(&self) -> u64 {
+        let chars: usize = self.window().iter().map(msg_chars).sum();
+        (chars as u64 * 100 / self.cfg.agent.context_chars.max(1) as u64).min(999)
+    }
+
+    /// `/status` in the terminal.
+    pub fn status_text(&self, tokens: (u64, u64)) -> String {
+        format!(
+            "model       {}\nbackground  {}\ncontext     {}% of {} chars · {} messages{}\ntokens      {} in · {} out this session\nlearning    {} · autonomy {} · yolo {}\nsession     {}",
+            self.cfg.provider.model,
+            self.cfg.background().provider.model,
+            self.context_percent(),
+            self.cfg.agent.context_chars,
+            self.history.len(),
+            if self.summary.is_empty() { "" } else { " (older ones summarised)" },
+            tokens.0,
+            tokens.1,
+            self.cfg.learning.mode,
+            self.cfg.tools.autonomy,
+            crate::autonomy::yolo_left().map(|l| format!("on, {} left", crate::autonomy::fmt_left(l))).unwrap_or_else(|| "off".into()),
+            self.session.id,
+        )
+    }
+
     pub fn switch_model(&mut self, cfg: &Config) -> Result<(), String> {
+        let live = self.llm.live();
         self.llm = Llm::new(&cfg.provider)?;
+        self.llm.set_live(live);
         self.bg = Llm::new(&cfg.background().provider)?;
         self.cfg.provider = cfg.provider.clone();
         self.system = system_prompt(&self.home, &self.cfg); // it states which model it is
@@ -292,7 +319,13 @@ impl Agent {
                     (chars + tool_chars) / 4
                 );
             }
-            let reply = self.llm.chat(&window, &defs)?;
+            let live = self.interactive && self.llm.live();
+            if live {
+                crate::ui::thinking();
+            }
+            let reply = self.llm.chat(&window, &defs);
+            let streamed = live && crate::ui::reply_done();
+            let reply = reply?;
             let calls = reply.tool_calls.clone().unwrap_or_default();
             let text = reply.content.clone().unwrap_or_default();
             self.push(reply);
@@ -301,7 +334,7 @@ impl Agent {
                 self.settle_skills(viewed, !failed_after);
                 return Ok(text);
             }
-            if self.interactive && !text.trim().is_empty() {
+            if self.interactive && !streamed && !text.trim().is_empty() {
                 eprintln!("{}", text.trim());
             }
             // read-only calls that need nobody's approval run side by side (top + ps + journalctl at once)
@@ -314,21 +347,25 @@ impl Agent {
                     .collect();
                 if par.len() >= 2 {
                     let (home, cfg, sid, inter, set) = (&self.home, &self.cfg, self.session.id.as_str(), self.interactive, self.set);
-                    let outs: Vec<(usize, String)> = std::thread::scope(|sc| {
+                    let outs: Vec<(usize, String, f64)> = std::thread::scope(|sc| {
                         let hs: Vec<_> = par
                             .iter()
                             .map(|&i| {
                                 let c = &calls[i];
-                                eprintln!("  · {} {} (in parallel)", c.function.name, one_line(&c.function.arguments, 80));
+                                crate::ui::tool_start(&c.function.name, &c.function.arguments, true);
                                 sc.spawn(move || {
                                     let ctx = Ctx { home, cfg, session: sid, interactive: inter, approver: None };
-                                    (i, tools::execute(&ctx, set, &c.function.name, &c.function.arguments))
+                                    let t0 = std::time::Instant::now();
+                                    (i, tools::execute(&ctx, set, &c.function.name, &c.function.arguments), t0.elapsed().as_secs_f64())
                                 })
                             })
                             .collect();
                         hs.into_iter().filter_map(|h| h.join().ok()).collect()
                     });
-                    for (i, o) in outs {
+                    for (i, o, secs) in outs {
+                        if inter {
+                            crate::ui::tool_done(&o, secs);
+                        }
                         early[i] = Some(o);
                     }
                 }
@@ -361,7 +398,8 @@ impl Agent {
                         repeats - 1
                     )
                 } else {
-                    eprintln!("  · {name} {}", one_line(args, 90));
+                    crate::ui::tool_start(name, args, false);
+                    let t0 = std::time::Instant::now();
                     let ctx = Ctx {
                         home: &self.home,
                         cfg: &self.cfg,
@@ -370,6 +408,9 @@ impl Agent {
                         approver,
                     };
                     let out = tools::execute(&ctx, self.set, name, args);
+                    if self.interactive {
+                        crate::ui::tool_done(&out, t0.elapsed().as_secs_f64());
+                    }
                     self.tools_since_review += 1;
                     if name == "skill_view" && !failed(&out) {
                         let v: serde_json::Value = serde_json::from_str(args).unwrap_or_default();
@@ -449,7 +490,15 @@ impl Agent {
              best answer: the answer or most likely explanation, the key evidence, and what is still uncertain. End with \
              one line on what you'd check next if they say \"continue\".]"
         )));
-        match self.llm.chat(&window, &serde_json::json!([])) {
+        let live = self.interactive && self.llm.live();
+        if live {
+            crate::ui::thinking();
+        }
+        let reply = self.llm.chat(&window, &serde_json::json!([]));
+        if live {
+            crate::ui::reply_done();
+        }
+        match reply {
             Ok(r) => {
                 let text = r.content.unwrap_or_default();
                 let text = text.trim();
@@ -1216,29 +1265,39 @@ pub fn system_prompt(home: &std::path::Path, cfg: &Config) -> String {
 pub fn repl(home: PathBuf, cfg: Config) -> Result<(), String> {
     let model = cfg.provider.model.clone();
     let mut a = Agent::new(home.clone(), cfg.clone(), true, "cli")?;
+    let rich = crate::ui::start();
+    a.llm.set_live(rich);
     println!("pagurus {} · {model} · learning: {} · /help", env!("CARGO_PKG_VERSION"), cfg.learning.mode);
     if let Some(news) = learn::news(&home) {
         println!("{news} — /learn to see it");
     }
-    let stdin = std::io::stdin();
-    loop {
-        match crate::autonomy::yolo_left() {
-            Some(left) => print!("⚡{} › ", crate::autonomy::fmt_left(left)),
-            None => print!("› "),
+    if rich {
+        println!("{}", crate::ui::dim("Enter sends · Alt-Enter or Ctrl-J for a new line · ↑ history · Tab completes / commands · Ctrl-C stops an answer"));
+    }
+    let mut input = crate::ui::Reader::new(&home, REPL_COMMANDS.to_vec());
+    let mut last_answer = String::new();
+    let mut session_tokens = (0u64, 0u64);
+    while let Some(raw) = input.read() {
+        let mut line_owned = raw.trim().to_string();
+        if line_owned == "/edit" {
+            match compose(&home) {
+                Some(text) => {
+                    println!("{}", crate::ui::dim(&format!("(sending {} lines from the editor)", text.lines().count())));
+                    line_owned = text;
+                }
+                None => continue,
+            }
         }
-        let _ = std::io::stdout().flush();
-        let mut line = String::new();
-        if stdin.lock().read_line(&mut line).map_err(|e| e.to_string())? == 0 {
-            break;
-        }
-        let line = line.trim();
+        let line = line_owned.as_str();
         let mut words = line.split_whitespace();
         match words.next().unwrap_or("") {
             "" => continue,
             "/exit" | "/quit" => break,
-            "/help" => println!(
-                "/new  fresh session (re-reads memory)\n/pin <fact> · /pins · /unpin <n|all>  keep facts in view for this conversation\n/good · /bad [what was wrong]  rate the last answer (a /bad makes pagurus reflect on it)\n/undo · /retry  forget the last exchange / ask it again\n/rollback [n]  list file checkpoints / restore a file pagurus wrote or edited\n/procs  background processes\n/yolo [30m|off]  run commands without asking for a while (the safety floor stays) · /audit [all]  what ran and who decided\n/model [n | background n]  list or switch models\n/image <path> [question]  ask about an image (needs a model that can see)\n/learn [show|approve|reject|history|undo] …\n/review  run reflection now\n/exit"
-            ),
+            "/help" => println!("{}", REPL_HELP),
+            "/clear" => print!("\x1b[2J\x1b[H"),
+            "/status" => println!("{}", a.status_text(session_tokens)),
+            "/tools" => println!("{}", tool_list(&a.cfg)),
+            "/copy" => println!("{}", copy(&last_answer)),
             "/new" => {
                 let t0 = now();
                 if a.has_unreviewed() {
@@ -1267,10 +1326,7 @@ pub fn repl(home: PathBuf, cfg: Config) -> Result<(), String> {
             "/retry" => match a.undo_last() {
                 Some(m) => {
                     let t0 = now();
-                    match a.turn(&m) {
-                        Ok(t) => println!("{}", t.trim()),
-                        Err(e) => eprintln!("error: {e}"),
-                    }
+                    show_turn(&mut a, &m, vec![], &mut last_answer, &mut session_tokens);
                     report(&home, t0);
                 }
                 None => println!("nothing to retry"),
@@ -1293,10 +1349,7 @@ pub fn repl(home: PathBuf, cfg: Config) -> Result<(), String> {
                 match std::fs::read(crate::util::expand(path)).map_err(|e| format!("{path}: {e}")).and_then(|b| crate::util::image_data_url(&b)) {
                     Ok(url) => {
                         let t0 = now();
-                        match a.turn_full(&question, vec![url], None) {
-                            Ok(t) => println!("{}", t.trim()),
-                            Err(e) => eprintln!("error: {e}"),
-                        }
+                        show_turn(&mut a, &question, vec![url], &mut last_answer, &mut session_tokens);
                         a.after_turn();
                         report(&home, t0);
                     }
@@ -1321,10 +1374,7 @@ pub fn repl(home: PathBuf, cfg: Config) -> Result<(), String> {
             }
             _ => {
                 let t0 = now();
-                match a.turn(line) {
-                    Ok(t) => println!("{}", t.trim()),
-                    Err(e) => eprintln!("error: {e}"),
-                }
+                show_turn(&mut a, line, vec![], &mut last_answer, &mut session_tokens);
                 for (p, caption) in tools::take_attachments() {
                     println!("📎 {}{}", p.display(), if caption.is_empty() { String::new() } else { format!(" — {caption}") });
                 }
@@ -1339,6 +1389,119 @@ pub fn repl(home: PathBuf, cfg: Config) -> Result<(), String> {
     }
     report(&home, t0);
     Ok(())
+}
+
+const REPL_COMMANDS: &[&str] = &[
+    "/help", "/new", "/status", "/model", "/tools", "/pin", "/pins", "/unpin", "/good", "/bad", "/undo", "/retry", "/copy",
+    "/edit", "/image", "/rollback", "/procs", "/yolo", "/audit", "/learn", "/review", "/clear", "/exit",
+];
+
+const REPL_HELP: &str = "Conversation
+  /new                     fresh session (re-reads memory)
+  /undo · /retry           forget the last exchange · ask it again
+  /pin <fact> · /pins · /unpin <n|all>   keep facts in view for this conversation
+  /edit                    write a long message in your editor ($EDITOR)
+  /image <path> [question] ask about an image (needs a model that can see)
+  /copy                    copy the last answer to the clipboard
+Model and status
+  /model [n | background n]   list or switch models
+  /status                  model, context use, tokens, yolo, learning
+  /tools                   what pagurus can use right now
+Safety
+  /yolo [30m|off]          run commands without asking for a while (the safety floor stays)
+  /audit [all]             what ran and who decided
+  /rollback [n]            file checkpoints · put back a file pagurus changed
+  /procs                   background processes
+Learning
+  /good · /bad [what was wrong]   rate the last answer (a /bad makes pagurus reflect on it)
+  /learn [show|approve|reject|history|undo] …   ·   /review   reflect now
+Other
+  /clear · /exit
+Keys: Enter sends · Alt-Enter or Ctrl-J new line (or end a line with \\) · ↑/↓ history (matching what you typed)
+      Tab completes commands · Ctrl-A/E start/end · Ctrl-W delete word · Ctrl-U clear · Ctrl-L clear screen
+      Ctrl-C stops a running answer (twice quits)";
+
+/// Run one turn and show it: the answer (unless it already streamed) and a status line.
+fn show_turn(a: &mut Agent, text: &str, images: Vec<String>, last: &mut String, totals: &mut (u64, u64)) {
+    crate::ui::turn_started();
+    crate::util::CANCEL.store(false, std::sync::atomic::Ordering::SeqCst);
+    let _ = crate::llm::take_usage();
+    let t0 = std::time::Instant::now();
+    match a.turn_full(text, images, None) {
+        Ok(t) if crate::util::cancelled() => {
+            let _ = crate::ui::reply_done();
+            println!("{}", crate::ui::dim("(stopped — say what you'd like instead)"));
+            let _ = t;
+        }
+        Ok(t) => {
+            crate::ui::answer(&t);
+            *last = t;
+        }
+        Err(_) if crate::util::cancelled() => {
+            let _ = crate::ui::reply_done();
+            println!("{}", crate::ui::dim("(stopped — say what you'd like instead)"));
+        }
+        Err(e) => eprintln!("error: {e}"),
+    }
+    let (i, o) = crate::llm::take_usage();
+    totals.0 += i;
+    totals.1 += o;
+    let k = |n: u64| if n >= 1000 { format!("{:.1}k", n as f64 / 1000.0) } else { n.to_string() };
+    crate::ui::status(&[
+        a.cfg.provider.model.rsplit('/').next().unwrap_or("").to_string(),
+        if i + o > 0 { format!("{} in · {} out", k(i), k(o)) } else { String::new() },
+        format!("{:.1}s", t0.elapsed().as_secs_f64()),
+        format!("context {}%", a.context_percent()),
+        crate::autonomy::yolo_left().map(|l| format!("⚡ yolo {}", crate::autonomy::fmt_left(l))).unwrap_or_default(),
+    ]);
+}
+
+/// `/edit`: write a message in $EDITOR. None when it came back empty.
+fn compose(home: &std::path::Path) -> Option<String> {
+    let p = home.join("workspace").join(".message.md");
+    let _ = std::fs::create_dir_all(p.parent()?);
+    let _ = std::fs::write(&p, "");
+    let editor = std::env::var("VISUAL").or_else(|_| std::env::var("EDITOR")).unwrap_or_else(|_| "vi".into());
+    let mut parts = editor.split_whitespace();
+    let ok = std::process::Command::new(parts.next()?).args(parts).arg(&p).status().map(|s| s.success()).unwrap_or(false);
+    let text = read(&p).trim().to_string();
+    let _ = std::fs::remove_file(&p);
+    if !ok || text.is_empty() {
+        println!("(nothing to send)");
+        return None;
+    }
+    Some(text)
+}
+
+/// `/copy`: the last answer to the system clipboard.
+fn copy(text: &str) -> String {
+    if text.trim().is_empty() {
+        return "Nothing to copy yet.".into();
+    }
+    let tools: &[&[&str]] = &[&["pbcopy"], &["wl-copy"], &["xclip", "-selection", "clipboard"], &["xsel", "--clipboard", "--input"]];
+    for t in tools {
+        let child = std::process::Command::new(t[0]).args(&t[1..]).stdin(std::process::Stdio::piped()).spawn();
+        if let Ok(mut c) = child {
+            if let Some(mut i) = c.stdin.take() {
+                let _ = i.write_all(text.as_bytes());
+            }
+            if c.wait().is_ok_and(|s| s.success()) {
+                return format!("Copied the last answer ({} characters).", text.chars().count());
+            }
+        }
+    }
+    "No clipboard tool found (pbcopy, wl-copy, xclip or xsel).".into()
+}
+
+fn tool_list(cfg: &Config) -> String {
+    let defs = tools::definitions(cfg, Set::Full);
+    let mut out = String::from("Tools pagurus can use right now:\n");
+    for d in defs.as_array().into_iter().flatten() {
+        let name = d["function"]["name"].as_str().unwrap_or("");
+        let desc = d["function"]["description"].as_str().unwrap_or("");
+        out += &format!("  {name:<16} {}\n", one_line(desc.split(". ").next().unwrap_or(desc), 90));
+    }
+    out.trim_end().to_string()
 }
 
 fn report(home: &std::path::Path, since: u64) {

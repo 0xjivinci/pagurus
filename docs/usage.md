@@ -6,6 +6,18 @@
 
 **Terminal:** `pagurus` (or `pagurus chat`). Type normally. Commands start with `/` (`/help` lists them).
 
+The full build's terminal chat (Linux and macOS) is richer: answers appear as they are written, a spinner shows while
+the model thinks, each tool call is shown with its outcome and time, and a status line under every answer gives the
+model, tokens, time, how full the context is and any yolo time left.
+
+- **Typing:** Enter sends. Alt-Enter or Ctrl-J starts a new line (or end a line with `\`), and pasted text keeps its
+  lines. ↑/↓ go through your history (`~/.pagurus/history`), matching what you've typed so far. Tab completes
+  `/` commands. Ctrl-A/E, Ctrl-W, Ctrl-U and Ctrl-L work as in a shell.
+- **Ctrl-C** stops a running answer and keeps what was written so far; a second Ctrl-C quits.
+- **More commands:** `/status`, `/tools`, `/copy` (the last answer to the clipboard), `/edit` (write a long message
+  in `$EDITOR`), `/clear`.
+- `NO_COLOR=1` turns colours off; `PAGURUS_PLAIN=1` gives the plain chat.
+
 **Telegram:** `pagurus setup` connects a bot, and only the chat IDs you allow get answers. Useful commands:
 
 | Command | What it does |
