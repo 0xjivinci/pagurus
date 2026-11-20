@@ -100,7 +100,7 @@ and can be undone. Set `mode = "propose"` to approve each change yourself, or `o
 
 | | |
 |---|---|
-| **Asks first** | Read-only commands (`ps`, `df`, `journalctl`, `cat`…) run on their own. Anything else waits for your yes. Never root. |
+| **Asks first** | Read-only commands (`ps`, `df`, `journalctl`, `cat`…) run on their own. Anything else waits for your yes, or runs during a `/yolo 30m` you switch on. A safety floor holds whatever you approve: never root, never wiping folders or disks, never `curl \| sh`. Every command is logged (`/audit`). |
 | **Watches** | Checks like "disk over 90%" run locally with no model and no tokens, and message you only when something changes. Reminders and daily tasks too. |
 | **Talks anywhere** | Terminal, Telegram, Discord, Slack and email, from one background service. Each answers only the people you allow. |
 | **Any model** | Any OpenAI-compatible API, Anthropic's own API, or a local model in LM Studio or Ollama, with fallback chains when one is busy. |

@@ -14,6 +14,8 @@ you're most likely to touch:
 | `agent.context_chars` · `max_history` · `summarize` | 24000 · 24 · true | conversation window |
 | `learning.mode` · `auto_daily_limit` | auto · 12 | learning policy |
 | `tools.shell` | ask | `off` · `allowlist` (never ask) · `ask` |
+| `tools.autonomy` · `auto_allow` | ask · `[]` | `auto` also runs the `auto_allow` commands without asking, see [approvals](tools.md#approvals-the-safety-floor-and-yolo) |
+| `tools.shell_deny` | `[]` | commands never run, even when approved (on top of the safety floor) |
 | `tools.read_roots` · `write_roots` · `web` | `["/"]` · `[]` · true | file and web access |
 | `daemon.heartbeat_minutes` | 60 | default interval for tasks without one |
 | `agent.delegate_parallel` | 3 | sub-agents one `delegate` call runs at once |
@@ -43,4 +45,6 @@ you're most likely to touch:
   workspace/                              where file tools may write
   workspace/.tool-output/                 long tool output, for paging
   checkpoints/                            files as they were before pagurus wrote them (/rollback)
+  audit.jsonl                             every command and who decided (`pagurus audit`)
+  state/daemon.json                       the daemon's timers, so restarts don't reset them
 ```

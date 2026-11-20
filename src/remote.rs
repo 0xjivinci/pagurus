@@ -210,6 +210,7 @@ pub fn shell(ctx: &Ctx, a: &Value, cmd: &str) -> Option<Result<String, String>> 
 
 fn on_host(ctx: &Ctx, h: &Host, cmd: &str) -> Result<String, String> {
     tools::plain_command(ctx, cmd)?;
+    tools::above_floor(ctx, cmd)?;
     let allow = h.shell_allow.as_ref().unwrap_or(&ctx.cfg.tools.shell_allow);
     let why = match tools::gate(ctx.home, allow, cmd, true) {
         None if h.approve == "always" => Some("this host asks for every command".to_string()),
@@ -558,8 +559,11 @@ mod tests {
         let ctx = Ctx { home: &home, cfg: &cfg, session: "t", interactive: false, approver: Some(&no) };
         let err = shell(&ctx, &json!({"host":"evil.example"}), "uptime").unwrap().unwrap_err();
         assert!(err.contains("no host `evil.example`"));
-        assert!(shell(&ctx, &json!({"host":"pi"}), "reboot").unwrap().unwrap_err().contains("did not approve"));
-        assert!(asked.borrow()[0].contains("reboot") && asked.borrow()[0].contains("host `pi`"));
+        assert!(shell(&ctx, &json!({"host":"pi"}), "touch x").unwrap().unwrap_err().contains("did not approve"));
+        assert!(asked.borrow()[0].contains("touch x") && asked.borrow()[0].contains("host `pi`"));
+        // the safety floor holds on other machines too, and nobody is even asked
+        assert!(shell(&ctx, &json!({"host":"pi"}), "sudo reboot").unwrap().unwrap_err().contains("safety floor"));
+        assert_eq!(asked.borrow().len(), 1);
         assert!(shell(&ctx, &json!({"host":"pi"}), "ls\u{1b}[2K").unwrap().unwrap_err().contains("control"));
         // read-only: runs unasked (and fails to connect)
         let t = std::time::Instant::now();

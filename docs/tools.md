@@ -6,7 +6,7 @@
 
 | Tool | Notes |
 |---|---|
-| `shell` | Read-only commands run directly: `ps df free uptime journalctl cat grep ip ss vcgencmd systemctl status/show/list-units …`, also joined with `\|`, `&&`, `\|\|`. **Anything else asks you first** (`/yes` on Telegram, y/N in the terminal). Unattended runs refuse it. pagurus never has root. |
+| `shell` | Read-only commands run directly: `ps df free uptime journalctl cat grep ip ss vcgencmd systemctl status/show/list-units …`, also joined with `\|`, `&&`, `\|\|`. **Anything else asks you first** (`/yes` on Telegram, y/N in the terminal), unless you turned on [`auto` or yolo](#approvals-the-safety-floor-and-yolo). Unattended runs refuse it. Some commands never run: see [the safety floor](#approvals-the-safety-floor-and-yolo). |
 | `read_file` · `list_dir` · `write_file` | Reads anywhere **except files that look like secrets** (`~/.ssh`, keys, tokens, `.env`, its own `env` file). Writes only in `~/.pagurus/workspace`. |
 | `edit_file` | Replaces one snippet in a file (exact, or ignoring whitespace/quote differences when that is still unique). Every write and edit first saves a checkpoint: `/rollback` lists the last 30 and puts a file back. |
 | `process` | Long-running commands in the background (a build, `journalctl -f`): **always asks you first**, at most 3 at once, each stopped after 60 min (max 24 h). It reads their output later, and you get a message when one ends. |
@@ -21,6 +21,42 @@
 | `session_search` | Searches your past conversations, best matches first, each with the messages around it; by date (`7d`, `2026-06-01`) and channel. |
 | `memory` · `skill_propose` · `skill_view` | Its long-term memory and skills: see [Learning](learning.md). |
 | `mcp_<server>_<tool>` | Tools from MCP servers you connect: see [MCP](#mcp). Each call asks you first unless you mark the tool read-only. |
+
+## Approvals, the safety floor and yolo
+
+Every command pagurus wants to run is decided in one of these ways, and each decision is written to
+`~/.pagurus/audit.jsonl`. `pagurus audit` (or `/audit`) shows the recent ones; `/audit all` includes read-only commands.
+
+| How | When |
+|---|---|
+| **read-only** | on the allowlist (`tools.shell_allow`) and passes the read-only checks: runs directly |
+| **you** · **denied** | anything else: you answer `/yes` or `/no` (y/N in the terminal). `/all` approves everything for the current message |
+| **auto** | `autonomy = "auto"`: commands made only of `auto_allow` entries (and allowlisted ones) also run unasked |
+| **yolo** | `/yolo 30m`: everything above the floor runs unasked, for at most 12 hours |
+| **blocked** | below the safety floor: never runs, whoever approves |
+
+**The safety floor** holds whatever you approve, including `/yes`, `/all` and yolo:
+
+- anything as root: `sudo`, `doas`, `su`, `pkexec`
+- deleting whole folders that matter: `/`, system folders, your home folder or a folder directly in it, pagurus's home
+- formatting, partitioning or writing straight to disks: `mkfs`, `dd of=/dev/…`, `diskutil erase…`, `fdisk`
+- shutting down or restarting the machine, killing every process, fork bombs
+- piping a download into a shell (`curl … | sh`, `bash <(curl …)`): download it, read it, then run it
+- uploading local files (`curl -T`, `-F file=@…`, `-d @…`, `wget --post-file`)
+- changing pagurus's own settings, keys, records or service (`config.toml`, `env`, `audit.jsonl`, the learning ledger,
+  the launchd/systemd service, the `pagurus` program), stopping pagurus, and running its own commands except `doctor`
+- changing your logins and start-up files (`~/.ssh`, `~/.gnupg`, `.bashrc`, `.zshrc`, `.profile`), `/etc/sudoers`,
+  `/etc/passwd`, and replacing or removing your crontab
+- whatever you add yourself: `shell_deny = ["git push", "npm publish"]`
+
+The floor applies on this machine, over ssh and to background processes. It does not apply inside the throwaway Docker
+sandbox. It guards against mistakes, not against a determined attacker: a command can always be spelled in a way it
+doesn't recognise. What it blocks, you can still run yourself.
+
+**Yolo** lasts until it runs out, `/yolo off` or `/stop`. In a chat app it covers only the chat that turned it on (and
+only the owner can), never the task board or requests from peers, and every reply shows `⚡ yolo 23m left`. In the
+terminal the prompt shows `⚡23m ›`. `pagurus run --yolo[=30m] "…"` does the same for one run. Yolo can't be switched
+on in `config.toml`; `tools.shell = "allowlist"` still refuses everything that isn't read-only.
 
 Long tool output (big logs, long pages) isn't cut off: the start and end are shown and the whole text is saved under
 `workspace/.tool-output/` for `read_file` to page through.
