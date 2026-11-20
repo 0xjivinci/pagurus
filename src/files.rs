@@ -316,7 +316,7 @@ mod tests {
         assert_eq!(read(&h.join("workspace/a.txt")), "hello pi\n");
         assert!(execute(&ctx, Set::Full, "edit_file", r#"{"path":"/etc/hosts","old_string":"a","new_string":"b"}"#).starts_with("error"));
         let r = execute(&ctx, Set::Full, "process", r#"{"action":"start","command":"sleep 5"}"#);
-        assert!(r.contains("nobody can give it"), "unattended: never started ({r})");
+        assert!(r.contains("nobody can approve"), "unattended: never started ({r})");
         assert!(execute(&ctx, Set::Sub, "process", r#"{"action":"list"}"#).contains("not available"));
         assert!(execute(&ctx, Set::Full, "clarify", r#"{"question":"which?"}"#).contains("unattended"));
         let no = |_: &str| false;

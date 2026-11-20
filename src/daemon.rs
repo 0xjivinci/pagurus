@@ -515,6 +515,7 @@ struct Chat {
 
 struct Pending {
     chat: i64,
+    cmd: String,
     answer: Sender<bool>,
     deadline: u64,
 }
@@ -530,6 +531,8 @@ struct Daemon {
     waiting: VecDeque<(i64, String, Sender<bool>)>,
     /// The user answered /all: approve this chat's commands until its turn ends.
     trusted: Option<i64>,
+    /// `/yolo`: this chat's commands run without asking until then (never background work).
+    yolo: Option<(i64, u64)>,
     inflight: usize,
     heartbeat_running: bool,
     checks_running: bool,
@@ -597,6 +600,10 @@ impl Daemon {
                     // sent too late for the turn to see: run them next
                     c.queue.extend(c.inbox.lock().map(|mut q| q.drain(..).collect::<Vec<_>>()).unwrap_or_default());
                 }
+                let text = match self.yolo_left(chat) {
+                    Some(left) => format!("{text}\n\n⚡ yolo {} left", crate::autonomy::fmt_left(left)),
+                    None => text,
+                };
                 self.say(chat, &text);
                 self.attachments(chat);
                 if let (true, Some(t)) = (crate::voice::should_speak(&self.cfg.voice, chat), self.ch.clone()) {
@@ -663,8 +670,15 @@ impl Daemon {
                     }
                 }
             }
+            Event::Approval { chat, cmd, answer } if self.yolo_left(chat).is_some() => {
+                eprintln!("pagurus: chat {chat} APPROVED (yolo) `{cmd}`");
+                crate::autonomy::audit(&self.home, "yolo", &cmd);
+                self.say(chat, &format!("⚡ {}", crate::util::one_line(&cmd, 200)));
+                let _ = answer.send(true);
+            }
             Event::Approval { chat, cmd, answer } if self.trusted == Some(chat) => {
                 eprintln!("pagurus: chat {chat} APPROVED (via /all) `{cmd}`");
+                crate::autonomy::audit(&self.home, "all", &cmd);
                 self.say(chat, &format!("✅ running (approved for this message): {}", crate::util::one_line(&cmd, 200)));
                 let _ = answer.send(true);
             }
@@ -692,7 +706,7 @@ impl Daemon {
             Some(_) if self.pending.is_some() => self.waiting.push_back((chat, cmd, answer)),
             Some(c) => {
                 self.ask(&c, chat, &cmd);
-                self.pending = Some(Pending { chat, answer, deadline: now() + APPROVAL_SECS });
+                self.pending = Some(Pending { chat, cmd, answer, deadline: now() + APPROVAL_SECS });
             }
             None => {
                 let _ = answer.send(false);
@@ -709,6 +723,21 @@ impl Daemon {
         }
     }
 
+    /// Seconds of yolo left for this chat.
+    fn yolo_left(&self, chat: i64) -> Option<u64> {
+        self.yolo.filter(|(c, until)| *c == chat && *until > now()).map(|(_, until)| until - now())
+    }
+
+    /// Tell the chat once its yolo has run out.
+    fn expire_yolo(&mut self) {
+        if let Some((chat, until)) = self.yolo {
+            if now() >= until {
+                self.yolo = None;
+                self.say(chat, "yolo ended: commands need your approval again.");
+            }
+        }
+    }
+
     fn give_back(&mut self, chat: i64, agent: Box<Agent>) {
         let c = self.chats.entry(chat).or_insert_with(|| Chat { agent: None, last: now(), queue: VecDeque::new(), typing: false, inbox: Default::default() });
         c.agent = Some(agent);
@@ -718,8 +747,9 @@ impl Daemon {
         }
     }
 
-    fn answer(&mut self, ok: bool, why: &str) {
+    fn answer(&mut self, ok: bool, how: &str, why: &str) {
         if let Some(p) = self.pending.take() {
+            crate::autonomy::audit(&self.home, how, &p.cmd);
             let _ = p.answer.send(ok);
             if let Some(c) = &self.ch {
                 c.markup(p.chat, why, Some(&json!({ "remove_keyboard": true })));
@@ -759,16 +789,16 @@ impl Daemon {
             if p.chat == chat {
                 match cmd.as_str() {
                     "/yes" | "yes" | "y" => {
-                        self.answer(true, "✅ approved — running it");
+                        self.answer(true, "you", "✅ approved — running it");
                         return None;
                     }
                     "/no" | "no" | "n" => {
-                        self.answer(false, "❌ denied");
+                        self.answer(false, "denied", "❌ denied");
                         return None;
                     }
                     "/all" => {
                         self.trusted = Some(chat);
-                        self.answer(true, "✅ approved — and everything else it runs for this message");
+                        self.answer(true, "all", "✅ approved — and everything else it runs for this message");
                         return None;
                     }
                     _ => {}
@@ -785,7 +815,8 @@ impl Daemon {
         Some(match cmd.as_str() {
             "/start" | "/help" => "pagurus here. /model · /good · /bad <what was wrong> · /undo · /retry · /stop · /new · /health · /rollback [n] (file edits) · /procs · /curate · /board [id | unblock id] · /peers · /pin <fact> · /pins · /unpin <n> · /tasks · /learn (what I learned + proposals) · /show <id> · \
                                    /approve <id|all> · /reject <id|all> [note] · /undo <id> · /lock <memory|user|skill> · /unlock … · \
-                                   /tidy · /history · /skills [archive|restore <name>]"
+                                   /tidy · /history · /skills [archive|restore <name>] · \
+                                   /yolo [30m|off] (no approvals for a while; the safety floor stays) · /audit [all]"
                 .into(),
             "/stop" => {
                 if !busy {
@@ -795,6 +826,10 @@ impl Daemon {
                 if self.trusted == Some(chat) {
                     self.trusted = None;
                 }
+                if self.yolo.is_some_and(|(c, _)| c == chat) {
+                    self.yolo = None;
+                    self.say(chat, "yolo off.");
+                }
                 if let Some(c) = self.chats.get_mut(&chat) {
                     c.queue.clear();
                     if let Ok(mut q) = c.inbox.lock() {
@@ -802,7 +837,7 @@ impl Daemon {
                     }
                 }
                 if self.pending.as_ref().is_some_and(|p| p.chat == chat) {
-                    self.answer(false, "❌ cancelled");
+                    self.answer(false, "denied", "❌ cancelled");
                 }
                 "⏹ stopping after the current step…".into()
             }
@@ -860,6 +895,22 @@ impl Daemon {
                 "Fresh session.".into()
             }
             "/yes" | "/no" | "/all" => "Nothing is waiting for approval.".into(),
+            "/yolo" if chat != self.owner() => "Only the owner can turn on yolo.".into(),
+            "/yolo" => {
+                let left = self.yolo_left(chat);
+                let mut set = None;
+                let reply = crate::autonomy::command(&format!("{arg} {rest}"), left, &mut |secs| set = Some(secs));
+                match set {
+                    Some(0) => self.yolo = None,
+                    Some(secs) => {
+                        self.yolo = Some((chat, now() + secs));
+                        eprintln!("pagurus: chat {chat} yolo on for {secs}s");
+                    }
+                    None => {}
+                }
+                reply
+            }
+            "/audit" => crate::autonomy::report(&home, arg == "all", 20),
             "/lock" => need(learn::set_lock(&home, &arg, true)),
             "/unlock" => need(learn::set_lock(&home, &arg, false)),
             "/learn" => learn::list_text(&home),
@@ -1038,6 +1089,7 @@ pub fn run(home: PathBuf, cfg: Config) -> Result<(), String> {
         pending: None,
         waiting: VecDeque::new(),
         trusted: None,
+        yolo: None,
         inflight: 0,
         heartbeat_running: false,
         checks_running: false,
@@ -1045,15 +1097,19 @@ pub fn run(home: PathBuf, cfg: Config) -> Result<(), String> {
         last_alert: HashMap::new(),
         started: now(),
     };
-    let mut next_due: HashMap<String, u64> = HashMap::new();
-    let mut last_tidy = now();
-    let mut last_curate = now();
+    // timers survive restarts: a daemon restarted daily still tidies, a daily task
+    // doesn't fire after every restart, and one missed while offline runs once
+    let state = State::load(&d.home);
+    let mut next_due: HashMap<String, u64> = state.next_due;
+    let (mut last_tidy, mut last_curate) = (state.last_tidy, state.last_curate);
+    let mut saved = (last_tidy, last_curate, next_due.clone());
     let mut last_typing = 0;
     loop {
 
+        d.expire_yolo();
         if d.pending.as_ref().is_some_and(|p| now() >= p.deadline) {
             eprintln!("pagurus: approval timed out");
-            d.answer(false, "⌛ no answer — not running it");
+            d.answer(false, "timeout", "⌛ no answer — not running it");
         }
 
         // schedule due standing tasks (re-read so heartbeat-tool edits apply at once)
@@ -1084,7 +1140,11 @@ pub fn run(home: PathBuf, cfg: Config) -> Result<(), String> {
                     Some(c) => c.next_after(now()),
                     None => now() + if check.is_some() { 10 } else { 60 },
                 };
-                let next = *next_due.entry(t.text.clone()).or_insert(first);
+                let mut next = *next_due.entry(t.text.clone()).or_insert(first);
+                if t.cal.is_some() && next + CATCH_UP_SECS < now() {
+                    next = first; // missed long ago (offline): wait for the next time instead of running late
+                    next_due.insert(t.text.clone(), next);
+                }
                 if now() >= next && !busy {
                     next_due.insert(t.text.clone(), interval_next(now()));
                     true
@@ -1105,6 +1165,10 @@ pub fn run(home: PathBuf, cfg: Config) -> Result<(), String> {
                 None if t.cal.is_some() => due.push(format!("(scheduled task: always message the user with the result) {}", t.text)),
                 None => due.push(t.text.clone()),
             }
+        }
+        if saved.0 != last_tidy || saved.1 != last_curate || saved.2 != next_due {
+            saved = (last_tidy, last_curate, next_due.clone());
+            State { last_tidy, last_curate, next_due: next_due.clone() }.save(&d.home);
         }
         if !checks.is_empty() {
             d.checks_running = true;
@@ -1196,8 +1260,55 @@ pub fn run(home: PathBuf, cfg: Config) -> Result<(), String> {
     }
 }
 
+/// A scheduled task missed by more than this while pagurus was off is skipped, not run late.
+const CATCH_UP_SECS: u64 = 12 * 3600;
+
+/// What the daemon remembers across restarts (`state/daemon.json`).
+struct State {
+    last_tidy: u64,
+    last_curate: u64,
+    /// When each standing task (by its text) runs next.
+    next_due: HashMap<String, u64>,
+}
+
+impl State {
+    fn path(home: &Path) -> PathBuf {
+        home.join("state").join("daemon.json")
+    }
+
+    fn load(home: &Path) -> State {
+        let v: serde_json::Value = serde_json::from_str(&read(&Self::path(home))).unwrap_or_default();
+        let t = |k: &str| v[k].as_u64().filter(|t| *t > 0 && *t <= now()).unwrap_or_else(now);
+        let next_due = v["next_due"].as_object().map(|m| m.iter().filter_map(|(k, v)| Some((k.clone(), v.as_u64()?))).collect()).unwrap_or_default();
+        State { last_tidy: t("last_tidy"), last_curate: t("last_curate"), next_due }
+    }
+
+    fn save(&self, home: &Path) {
+        let p = Self::path(home);
+        let _ = std::fs::create_dir_all(p.parent().unwrap_or(home));
+        let v = json!({ "last_tidy": self.last_tidy, "last_curate": self.last_curate, "next_due": self.next_due });
+        if let Err(e) = crate::util::write_atomic(&p, &v.to_string()) {
+            eprintln!("pagurus: couldn't save daemon state: {e}");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn daemon_timers_survive_a_restart() {
+        let home = std::env::temp_dir().join(format!("pagurus-state-{}", crate::util::new_id()));
+        let fresh = super::State::load(&home);
+        assert!(fresh.last_tidy >= crate::util::now() - 5 && fresh.next_due.is_empty(), "first start: timers start now");
+        let mut due = std::collections::HashMap::new();
+        due.insert("check disk".to_string(), 1_900_000_000u64);
+        super::State { last_tidy: 1_000, last_curate: 2_000, next_due: due }.save(&home);
+        let back = super::State::load(&home);
+        assert_eq!((back.last_tidy, back.last_curate), (1_000, 2_000));
+        assert_eq!(back.next_due["check disk"], 1_900_000_000);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
     use serde_json::json;
 
     #[test]
@@ -1228,6 +1339,7 @@ mod tests {
             pending: None,
             waiting: Default::default(),
             trusted: None,
+            yolo: None,
             inflight: 0,
             heartbeat_running: false,
             checks_running: false,

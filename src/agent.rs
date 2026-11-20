@@ -966,7 +966,15 @@ pub fn delegate(ctx: &Ctx, tasks: &[String]) -> Result<String, String> {
             let cmd = format!("{cmd}\n(asked by sub-agent {} of {n})", i + 1);
             let ok = match ctx.approver {
                 Some(f) => f(&cmd),
-                None => ctx.interactive && tools::confirm(&cmd),
+                None if crate::autonomy::yolo_left().is_some() => {
+                    crate::autonomy::audit(ctx.home, "yolo", &cmd);
+                    true
+                }
+                None => {
+                    let ok = ctx.interactive && tools::confirm(&cmd);
+                    crate::autonomy::audit(ctx.home, if ok { "you" } else { "denied" }, &cmd);
+                    ok
+                }
             };
             let _ = answer.send(ok);
         }
@@ -1092,6 +1100,10 @@ fn abilities(cfg: &Config, home: &std::path::Path) -> String {
          - Swarm: {swarm}.\n\
          - Big jobs: delegate runs up to {} sub-agents at once; the task board (`/board`, `pagurus board`) queues jobs \
            the daemon works through in the background ({}).\n\
+         - Approvals: commands that aren't read-only wait for the user's yes. The user can say `/yolo 30m` to let \
+           them run unasked for a while, and `/audit` shows what ran and who decided. A safety floor (root, wiping \
+           folders, disk tools, piping downloads into a shell, uploads, pagurus's own settings) blocks even approved \
+           commands: when it blocks one, give the user the exact command to run themselves.\n\
          - Other abilities you have when configured: Discord, Slack and email chat, MCP servers, ssh to other machines, \
            a Docker sandbox. Numbers about yourself (size, memory, speed, startup time): use only those above; never \
            estimate or invent one.\n",
@@ -1210,7 +1222,10 @@ pub fn repl(home: PathBuf, cfg: Config) -> Result<(), String> {
     }
     let stdin = std::io::stdin();
     loop {
-        print!("› ");
+        match crate::autonomy::yolo_left() {
+            Some(left) => print!("⚡{} › ", crate::autonomy::fmt_left(left)),
+            None => print!("› "),
+        }
         let _ = std::io::stdout().flush();
         let mut line = String::new();
         if stdin.lock().read_line(&mut line).map_err(|e| e.to_string())? == 0 {
@@ -1222,7 +1237,7 @@ pub fn repl(home: PathBuf, cfg: Config) -> Result<(), String> {
             "" => continue,
             "/exit" | "/quit" => break,
             "/help" => println!(
-                "/new  fresh session (re-reads memory)\n/pin <fact> · /pins · /unpin <n|all>  keep facts in view for this conversation\n/good · /bad [what was wrong]  rate the last answer (a /bad makes pagurus reflect on it)\n/undo · /retry  forget the last exchange / ask it again\n/rollback [n]  list file checkpoints / restore a file pagurus wrote or edited\n/procs  background processes\n/model [n | background n]  list or switch models\n/image <path> [question]  ask about an image (needs a model that can see)\n/learn [show|approve|reject|history|undo] …\n/review  run reflection now\n/exit"
+                "/new  fresh session (re-reads memory)\n/pin <fact> · /pins · /unpin <n|all>  keep facts in view for this conversation\n/good · /bad [what was wrong]  rate the last answer (a /bad makes pagurus reflect on it)\n/undo · /retry  forget the last exchange / ask it again\n/rollback [n]  list file checkpoints / restore a file pagurus wrote or edited\n/procs  background processes\n/yolo [30m|off]  run commands without asking for a while (the safety floor stays) · /audit [all]  what ran and who decided\n/model [n | background n]  list or switch models\n/image <path> [question]  ask about an image (needs a model that can see)\n/learn [show|approve|reject|history|undo] …\n/review  run reflection now\n/exit"
             ),
             "/new" => {
                 let t0 = now();
@@ -1290,6 +1305,11 @@ pub fn repl(home: PathBuf, cfg: Config) -> Result<(), String> {
             }
             "/rollback" => println!("{}", crate::files::rollback(&home, &words.collect::<Vec<_>>().join(" ")).unwrap_or_else(|e| e)),
             "/procs" => println!("{}", crate::procs::list()),
+            "/yolo" => {
+                let arg = words.collect::<Vec<_>>().join(" ");
+                println!("{}", crate::autonomy::command(&arg, crate::autonomy::yolo_left(), &mut crate::autonomy::set_yolo));
+            }
+            "/audit" => println!("{}", crate::autonomy::report(&home, words.next() == Some("all"), 20)),
             "/pin" => println!("{}", a.pin(&words.collect::<Vec<_>>().join(" "))),
             "/pins" => println!("{}", a.pins_text()),
             "/unpin" => println!("{}", a.unpin(&words.collect::<Vec<_>>().join(" "))),

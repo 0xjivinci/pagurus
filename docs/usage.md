@@ -24,6 +24,8 @@
 | `/tasks` · `/skills` · `/curate` · `/tidy` | standing tasks · skills · tidy the skill library · tidy memory |
 | `/health` | busy or idle, models cooling down, unsent messages, memory use |
 | `/yes` · `/no` · `/all` | answer an approval request (`/all` = everything for this message) |
+| `/yolo 30m` · `/yolo off` | run commands without asking for a while (at most 12 h; the [safety floor](tools.md#approvals-the-safety-floor-and-yolo) stays) |
+| `/audit` · `/audit all` | what ran recently and who decided (`all` includes read-only commands) |
 
 While pagurus is working it shows "typing…", and new messages are queued. `/stop` and the other commands still work.
 When pagurus asks you a question (`clarify`), its choices appear as buttons and your next message is the answer.

@@ -1,5 +1,6 @@
 mod agent;
 mod ask;
+mod autonomy;
 mod board;
 mod bundled;
 mod channel;
@@ -7,6 +8,7 @@ mod config;
 mod daemon;
 mod eval;
 mod files;
+mod floor;
 mod hub;
 mod import;
 mod learn;
@@ -33,7 +35,8 @@ usage:
   pagurus setup                 guided setup: model, key, Telegram, service
   pagurus init                  create ~/.pagurus (or $PAGURUS_HOME) non-interactively
   pagurus [chat]                interactive session
-  pagurus run <prompt…>         one-shot (also reads the prompt from stdin)
+  pagurus run [--yolo[=30m]] <prompt…>   one-shot (also reads the prompt from stdin); --yolo: no approvals
+  pagurus audit [all]           commands that ran and who decided (you, auto, yolo, blocked …)
   pagurus daemon                heartbeat + chat gateway: Telegram, Discord, Slack, email (the background service)
   pagurus service [install|remove|status]   start pagurus automatically (Linux: systemd, macOS: launchd)
   pagurus learn [list|show|approve|reject|history|undo|lock|tidy] …
@@ -83,8 +86,20 @@ fn run(args: &[String]) -> Result<(), String> {
         }
         "import" => import::run(&home, &config::load(&home)?, &args[1..]),
         "chat" => agent::repl(home.clone(), config::load(&home)?),
+        "audit" => {
+            println!("{}", autonomy::report(&home, args.get(1).is_some_and(|a| a == "all"), 40));
+            Ok(())
+        }
         "run" => {
-            let mut prompt = args[1..].join(" ");
+            let mut rest = &args[1..];
+            // `--yolo` or `--yolo=2h`: this one run needs no approvals (the safety floor stays)
+            if let Some(y) = rest.first().and_then(|a| a.strip_prefix("--yolo")) {
+                let secs = autonomy::parse_duration(y.trim_start_matches('=')).ok_or("usage: pagurus run --yolo[=30m] <prompt>")?;
+                autonomy::set_yolo(secs);
+                eprintln!("⚡ yolo for this run ({}): commands run without asking, the safety floor stays, all logged (`pagurus audit`)", autonomy::fmt_left(secs));
+                rest = &rest[1..];
+            }
+            let mut prompt = rest.join(" ");
             if prompt.trim().is_empty() && !std::io::stdin().is_terminal() {
                 std::io::stdin().read_to_string(&mut prompt).map_err(|e| e.to_string())?;
             }
@@ -237,7 +252,10 @@ fn doctor(home: &Path) -> Result<(), String> {
     println!("{}USER.md    {user}/{} chars", ok(user <= cfg.learning.user_char_limit), cfg.learning.user_char_limit);
     println!("   skills     {}", tools::skill_index(home).len());
     println!("   sessions   {n} files, {} KiB", bytes / 1024);
-    println!("   shell      {} (allow: {})", cfg.tools.shell, cfg.tools.shell_allow.join(" "));
+    println!("   shell      {} · autonomy {} (allow: {})", cfg.tools.shell, cfg.tools.autonomy, cfg.tools.shell_allow.join(" "));
+    if cfg.tools.autonomy == "auto" {
+        println!("   auto_allow {}", if cfg.tools.auto_allow.is_empty() { "(empty: auto works like ask)".into() } else { cfg.tools.auto_allow.join(" · ") });
+    }
     println!("   heartbeat  {} task(s) every {}m", daemon::heartbeat_tasks(home).len(), cfg.daemon.heartbeat_minutes);
     if let Some(t) = &cfg.telegram {
         let tok = std::env::var(&t.token_env).is_ok();

@@ -410,6 +410,12 @@ pub struct ToolsCfg {
     /// `off` | `allowlist` | `ask` (allowlisted run freely; others need a y/N in the terminal)
     pub shell: String,
     pub shell_allow: Vec<String>,
+    /// Commands blocked even when approved, on top of the built-in safety floor.
+    pub shell_deny: Vec<String>,
+    /// `ask` (approve everything not read-only) | `auto` (also run `auto_allow` commands without asking).
+    pub autonomy: String,
+    /// `auto` mode: commands that may run without asking even though they write (`cargo test`, `make`).
+    pub auto_allow: Vec<String>,
     pub shell_timeout_secs: u64,
     pub read_roots: Vec<String>,
     pub write_roots: Vec<String>,
@@ -453,6 +459,9 @@ impl Default for ToolsCfg {
             shell_allow: SAFE_COMMANDS.iter().chain(SAFE_COMMANDS_MACOS).map(|s| s.to_string()).collect(),
             #[cfg(windows)]
             shell_allow: SAFE_COMMANDS_WINDOWS.iter().map(|s| s.to_string()).collect(),
+            shell_deny: vec![],
+            autonomy: "ask".into(),
+            auto_allow: vec![],
             shell_timeout_secs: 30,
             read_roots: vec!["/".into()],
             web: true,
@@ -496,6 +505,12 @@ pub fn load(home: &Path) -> Result<Config, String> {
     }
     if !matches!(c.tools.shell.as_str(), "off" | "allowlist" | "ask") {
         return Err(format!("tools.shell must be off, allowlist or ask (got `{}`)", c.tools.shell));
+    }
+    if !matches!(c.tools.autonomy.as_str(), "ask" | "auto") {
+        return Err(format!(
+            "tools.autonomy must be ask or auto (got `{}`); yolo is switched on for a while with /yolo, not in the config",
+            c.tools.autonomy
+        ));
     }
     crate::mcp::check(&c.mcp)?;
     crate::remote::check(home, &c)?;
@@ -560,6 +575,12 @@ consolidate_at_percent = 70    # daemon: tidy memory (max daily) once a file is 
 shell = "ask"                  # off | allowlist | ask
 # read-only commands that run without asking; leave this out to get pagurus's default list
 # shell_allow = ["uptime", "df", "ps", "journalctl", "systemctl status", …]
+# shell_deny = ["git push", "npm publish"]   # never run these, even when approved (on top of the safety floor)
+autonomy = "ask"               # ask | auto: auto also runs the auto_allow commands without asking
+# auto_allow = ["cargo build", "cargo test", "make", "npm test"]
+# Never allowed, whoever approves: root (sudo), wiping folders, disk tools, piping downloads into a shell,
+# uploading local files, and changing pagurus's own settings, keys or service. `/yolo 30m` lifts approvals
+# (not the floor) for a while; every command is logged (`pagurus audit`).
 shell_timeout_secs = 30
 read_roots = ["/"]             # where read_file may read (files that look like secrets are always refused)
 write_roots = []               # extra dirs write_file may write
