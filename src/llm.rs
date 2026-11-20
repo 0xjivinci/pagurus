@@ -105,6 +105,178 @@ fn redacted_str<S: serde::Serializer>(v: &str, s: S) -> Result<S::Ok, S::Error> 
 /// Largest provider response read (an answer is a few KB; 16 MiB leaves room for anything sane).
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 
+thread_local! {
+    /// Tokens used by this thread's calls since the last `take_usage`: (in, out).
+    static USAGE: std::cell::Cell<(u64, u64)> = const { std::cell::Cell::new((0, 0)) };
+}
+
+/// Tokens in and out since the last call (this thread: the terminal's own turns).
+pub fn take_usage() -> (u64, u64) {
+    USAGE.with(|u| u.replace((0, 0)))
+}
+
+fn add_usage(u: &Value) {
+    let n = |k: &str| u.get(k).and_then(Value::as_u64).unwrap_or(0);
+    let input = n("prompt_tokens") + n("input_tokens") + n("cache_read_input_tokens") + n("cache_creation_input_tokens");
+    let output = n("completion_tokens") + n("output_tokens");
+    USAGE.with(|c| {
+        let (i, o) = c.get();
+        c.set((i + input, o + output));
+    });
+}
+
+/// Streaming (the rich terminal): text deltas go to the sink as they arrive.
+#[cfg(feature = "tui")]
+mod stream {
+    use super::{Msg, ToolCall, MAX_RESPONSE};
+    use serde_json::{json, Value};
+    use std::cell::{Cell, RefCell};
+    use std::io::{BufRead, Read};
+
+    /// Where streamed text goes.
+    pub type Sink = Box<dyn FnMut(&str)>;
+
+    thread_local! {
+        static SINK: RefCell<Option<Sink>> = RefCell::new(None);
+        static STREAMED: Cell<bool> = const { Cell::new(false) };
+    }
+
+    /// Show answers live on this thread (None: stop).
+    pub fn set(f: Option<Sink>) {
+        SINK.with(|s| *s.borrow_mut() = f);
+    }
+
+    pub fn on() -> bool {
+        SINK.with(|s| s.borrow().is_some())
+    }
+
+    /// Whether the last reply's text was already shown while it streamed.
+    pub fn take_streamed() -> bool {
+        STREAMED.with(|s| s.replace(false))
+    }
+
+    fn emit(t: &str) {
+        STREAMED.with(|s| s.set(true));
+        SINK.with(|s| {
+            if let Some(f) = s.borrow_mut().as_mut() {
+                f(t)
+            }
+        });
+    }
+
+    pub enum Sse {
+        /// The message, its finish reason.
+        Done(Msg, Option<String>),
+        /// Not a stream after all: the plain JSON answer.
+        Json(Value),
+        Err(String),
+    }
+
+    pub fn read(resp: ureq::Response) -> Sse {
+        STREAMED.with(|s| s.set(false));
+        let mut r = std::io::BufReader::new(resp.into_reader().take(MAX_RESPONSE));
+        let (mut content, mut calls, mut extra, mut finish) = (String::new(), Vec::<Value>::new(), None, None);
+        let mut line = String::new();
+        let mut first = true;
+        loop {
+            if crate::util::cancelled() {
+                return Sse::Err("stopped by the user".into()); // Ctrl-C: drop the rest of the answer
+            }
+            line.clear();
+            match r.read_line(&mut line) {
+                Ok(0) => break,
+                Ok(_) => {}
+                Err(e) => return Sse::Err(format!("stream broke off: {e}")),
+            }
+            let l = line.trim();
+            if l.is_empty() || l.starts_with(':') {
+                continue;
+            }
+            if first && !l.starts_with("data:") && !l.starts_with("event:") {
+                let mut rest = String::new();
+                let _ = r.read_to_string(&mut rest);
+                return match serde_json::from_str(&format!("{l}{rest}")) {
+                    Ok(v) => Sse::Json(v),
+                    Err(e) => Sse::Err(format!("unreadable response: {e}")),
+                };
+            }
+            first = false;
+            let Some(d) = l.strip_prefix("data:").map(str::trim) else { continue };
+            if d == "[DONE]" {
+                break;
+            }
+            let Ok(v) = serde_json::from_str::<Value>(d) else { continue };
+            if let Some(e) = v.get("error") {
+                return Sse::Err(format!("provider error: {}", crate::util::clip(&e.to_string(), 300)));
+            }
+            if let Some(u) = v.get("usage").filter(|u| u.is_object()) {
+                super::add_usage(u);
+            }
+            let ch = &v["choices"][0];
+            let delta = &ch["delta"];
+            if let Some(t) = delta["content"].as_str().filter(|t| !t.is_empty()) {
+                content.push_str(t);
+                emit(t);
+            }
+            for (pos, tc) in delta["tool_calls"].as_array().into_iter().flatten().enumerate() {
+                let i = tc["index"].as_u64().map(|i| i as usize).unwrap_or(pos);
+                while calls.len() <= i {
+                    calls.push(json!({ "id": "", "type": "function", "function": { "name": "", "arguments": "" } }));
+                }
+                let c = &mut calls[i];
+                if let Some(id) = tc["id"].as_str().filter(|x| !x.is_empty()) {
+                    c["id"] = json!(id);
+                }
+                if let Some(n) = tc["function"]["name"].as_str().filter(|x| !x.is_empty()) {
+                    if c["function"]["name"].as_str().is_none_or(str::is_empty) {
+                        c["function"]["name"] = json!(n);
+                    }
+                }
+                if let Some(a) = tc["function"]["arguments"].as_str() {
+                    let joined = format!("{}{a}", c["function"]["arguments"].as_str().unwrap_or(""));
+                    c["function"]["arguments"] = json!(joined);
+                }
+                for (k, x) in tc.as_object().into_iter().flatten() {
+                    if !matches!(k.as_str(), "index" | "id" | "type" | "function") {
+                        c[k] = x.clone(); // e.g. Gemini's thought signature
+                    }
+                }
+            }
+            if let Some(x) = delta.get("extra_content").filter(|x| !x.is_null()) {
+                extra = Some(x.clone());
+            }
+            if let Some(f) = ch["finish_reason"].as_str() {
+                finish = Some(f.to_string());
+            }
+        }
+        let mut tool_calls = Vec::new();
+        for (n, c) in calls.into_iter().enumerate() {
+            let mut c = c;
+            if c["id"].as_str().is_none_or(str::is_empty) {
+                c["id"] = json!(format!("call_{n}_{}", crate::util::new_id()));
+            }
+            match serde_json::from_value::<ToolCall>(c) {
+                Ok(tc) => tool_calls.push(tc),
+                Err(e) => return Sse::Err(format!("unexpected tool call in stream: {e}")),
+            }
+        }
+        if first {
+            return Sse::Err("empty response".into());
+        }
+        let msg = Msg {
+            role: "assistant".into(),
+            content: (!content.is_empty() || tool_calls.is_empty()).then_some(content),
+            tool_calls: (!tool_calls.is_empty()).then_some(tool_calls),
+            extra_content: extra,
+            ..Default::default()
+        };
+        Sse::Done(msg, finish)
+    }
+}
+
+#[cfg(feature = "tui")]
+pub use stream::{set as set_stream, take_streamed};
+
 struct Fail {
     msg: String,
     /// Credentials problem: no other model on this endpoint will work either.
@@ -206,6 +378,8 @@ pub struct Llm {
     http: ureq::Agent,
     p: Provider,
     routes: Vec<Route>,
+    /// Stream answers to the screen (the terminal's chat model only, not background work).
+    live: bool,
 }
 
 impl Llm {
@@ -218,7 +392,16 @@ impl Llm {
             .timeout_connect(Duration::from_secs(15))
             .timeout(Duration::from_secs(p.timeout_secs))
             .build();
-        Ok(Self { http, p: p.clone(), routes })
+        Ok(Self { http, p: p.clone(), routes, live: false })
+    }
+
+    /// Stream this model's answers to the screen while they're written (rich terminal).
+    pub fn set_live(&mut self, on: bool) {
+        self.live = on;
+    }
+
+    pub fn live(&self) -> bool {
+        self.live
     }
 
     /// Try the main model, then each fallback, within `call_budget_secs` in
@@ -289,6 +472,11 @@ impl Llm {
                 if tools.as_array().is_some_and(|a| !a.is_empty()) {
                     body["tools"] = tools.clone();
                 }
+                #[cfg(feature = "tui")]
+                if self.live && stream::on() {
+                    body["stream"] = json!(true);
+                    body["stream_options"] = json!({ "include_usage": true });
+                }
                 body
             }
         };
@@ -315,9 +503,37 @@ impl Llm {
             }
             match req.send_json(&body) {
                 Ok(resp) => {
+                    #[cfg(feature = "tui")]
+                    let resp = if body.get("stream").is_some() {
+                        match stream::read(resp) {
+                            stream::Sse::Done(msg, finish) => {
+                                let empty = msg.content.as_deref().is_none_or(|c| c.trim().is_empty())
+                                    && msg.tool_calls.as_ref().is_none_or(|t| t.is_empty());
+                                if empty && finish.as_deref() == Some("length") {
+                                    return Err(self.out_of_tokens());
+                                }
+                                return Ok(msg);
+                            }
+                            stream::Sse::Err(e) => {
+                                last = e;
+                                continue;
+                            }
+                            stream::Sse::Json(v) => Err(v),
+                        }
+                    } else {
+                        Ok(resp)
+                    };
+                    #[cfg(not(feature = "tui"))]
+                    let resp: Result<ureq::Response, Value> = Ok(resp);
                     // capped: a broken or hostile endpoint must not fill a 1 GB Pi's memory
-                    let v: Value = serde_json::from_reader(std::io::Read::take(resp.into_reader(), MAX_RESPONSE))
-                        .map_err(|e| Fail::soft(format!("unreadable response: {e}")))?;
+                    let v: Value = match resp {
+                        Ok(resp) => serde_json::from_reader(std::io::Read::take(resp.into_reader(), MAX_RESPONSE))
+                            .map_err(|e| Fail::soft(format!("unreadable response: {e}")))?,
+                        Err(v) => v,
+                    };
+                    if let Some(u) = v.get("usage") {
+                        add_usage(u);
+                    }
                     if std::env::var_os("PAGURUS_DEBUG").is_some() {
                         if let Some(u) = usage_note(&v) {
                             eprintln!("  [{}: {u}]", r.model);
@@ -527,6 +743,42 @@ mod tests {
 
     fn body_of(req: &str) -> serde_json::Value {
         serde_json::from_str(&req[req.find("\r\n\r\n").unwrap() + 4..]).unwrap()
+    }
+
+    #[cfg(feature = "tui")]
+    #[test]
+    fn streamed_answers_and_tool_calls_are_assembled() {
+        use super::Msg;
+        use serde_json::json;
+        let sse = concat!(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"Checking \"}}]}\n\n",
+            ": keep-alive\n\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"the disk.\"}}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"type\":\"function\",\"function\":{\"name\":\"shell\",\"arguments\":\"{\\\"comm\"}}]}}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"and\\\":\\\"df -h\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n",
+            "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":120,\"completion_tokens\":9}}\n\n",
+            "data: [DONE]\n\n"
+        );
+        let (port, rx) = serve(vec![("200 OK", sse.as_bytes().to_vec()), ("200 OK", br#"{"choices":[{"message":{"role":"assistant","content":"plain"}}],"usage":{"prompt_tokens":5,"completion_tokens":1}}"#.to_vec())]);
+        let p: crate::config::Provider = toml::from_str(&format!("base_url = \"http://127.0.0.1:{port}/v1\"\nmodel = \"m\"")).unwrap();
+        let mut llm = super::Llm::new(&p).unwrap();
+        llm.set_live(true);
+        let seen = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
+        let s2 = seen.clone();
+        super::set_stream(Some(Box::new(move |t: &str| s2.borrow_mut().push_str(t))));
+        let _ = super::take_usage();
+        let m = llm.chat(&[Msg::user("disk?")], &json!([])).unwrap();
+        assert_eq!(m.content.as_deref(), Some("Checking the disk."));
+        assert_eq!(*seen.borrow(), "Checking the disk.");
+        let calls = m.tool_calls.unwrap();
+        assert_eq!((calls[0].id.as_str(), calls[0].function.name.as_str(), calls[0].function.arguments.as_str()), ("c1", "shell", "{\"command\":\"df -h\"}"));
+        assert!(super::take_streamed());
+        assert!(body_of(&rx.recv().unwrap())["stream"] == json!(true));
+        // a server that ignores "stream" and answers plain JSON still works
+        let m = llm.chat(&[Msg::user("again")], &json!([])).unwrap();
+        assert_eq!(m.content.as_deref(), Some("plain"));
+        assert_eq!(super::take_usage(), (125, 10));
+        super::set_stream(None);
     }
 
     #[test]

@@ -23,14 +23,21 @@ ring = "0.17"
 # `sqlite` feature: session search on SQLite FTS5 (compiled in, no system library).
 rusqlite = { version = "0.32", default-features = false, features = ["bundled"], optional = true }
 
+# `tui` feature: raw terminal, window size and Ctrl-C for the rich chat. Already linked (through ring).
+[target.'cfg(unix)'.dependencies]
+libc = { version = "0.2", optional = true }
+
 [features]
 # The small build ("pagurus"): a tiny built-in index for session_search.
 default = []
 sqlite = ["dep:rusqlite"]
 # Crypto-art research for collectors and artists (Tezos via objkt; read-only).
 art = []
+# The rich terminal chat: streaming answers, a line editor with history and completion,
+# live tool progress, a status line, Ctrl-C to stop (Linux and macOS).
+tui = ["dep:libc"]
 # "uge": the big build for laptops and servers: every optional feature.
-uge = ["sqlite", "art"]
+uge = ["sqlite", "art", "tui"]
 # The older name for the big build.
 full = ["uge"]
 
