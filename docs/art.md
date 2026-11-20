@@ -6,8 +6,9 @@ The big build, **uge**, can research crypto art for collectors and artists. It i
 wallet, never buys, bids, lists or signs anything, and never asks for a seed phrase or private key. When you want to
 act, it gives you the objkt link and you do it in your own wallet. Nothing it says is financial advice.
 
-**Supported now:** Tezos, through objkt's free public API (no account or key needed).
-**Coming next:** Ethereum, which needs a free OpenSea or Alchemy API key.
+**Tezos:** objkt's free public API, no account or key needed.
+**Ethereum:** OpenSea's API. pagurus creates a free OpenSea key for agents by itself the first time (no account,
+valid 7 days, renewed automatically) and stores it in `~/.pagurus/env`. Your own key in `OPENSEA_API_KEY` is used instead if you set one.
 
 ## Ask in plain words
 
@@ -46,7 +47,8 @@ pagurus art piece <objkt link | KT1…/id>
 pagurus art look <objkt link | KT1…/id>   # fetch the preview image
 ```
 
-`<who>` is a tz… address, a `.tez` name or an objkt username.
+`<who>` is a tz… address, a `.tez` name or an objkt username, or for Ethereum an 0x… address or OpenSea username
+(add `--eth` to an OpenSea username). Ethereum alerts: `pagurus art eth-sold <artist> <minutes>`, `pagurus art eth-ask <piece>`.
 
 ## Alerts that cost nothing
 
@@ -61,4 +63,6 @@ These print a single number, so they work as [heartbeat checks](monitoring.md) w
 ## Limits
 
 - Sales cover objkt: fixed-price sales, English and Dutch auctions, accepted offers and open editions. Free claims are left out.
-- Data is objkt's; if objkt is slow or down, the tool says so.
+- Ethereum: artists are found by OpenSea username or address (ENS names only if they have an OpenSea profile);
+  collectors per artist and new-mint alerts are Tezos only for now; royalties shown are what was due, not what was paid.
+- Data is objkt's and OpenSea's; if a service is slow, down or rate-limited, the tool says so.

@@ -3,12 +3,12 @@ name: art-collector
 description: Research crypto art on Tezos for a collector: an artist's work and market, checking a piece before buying, watching for drops and price drops.
 ---
 
-Use when someone asks about an artist, a piece, a collection or whether something is worth buying. Tezos only for now (objkt). For Ethereum, say it's coming.
+Use when someone asks about an artist, a piece, a collection or whether something is worth buying. Tezos (objkt) and Ethereum (OpenSea): 0x… addresses and OpenSea links are Ethereum; otherwise pass chain=ethereum.
 
 ## Rules
 - Read-only. Never buy, bid, sign or ask for a seed phrase or private key. Give the objkt link so they act in their own wallet.
 - Not financial advice: give facts and red flags, never "buy" or "sell". Don't pick a favourite or a "best bet": present options and let them choose.
-- Say where data comes from (objkt) and that auctions and accepted offers are not in the sales numbers.
+- Say where data comes from (objkt or OpenSea). On Ethereum, royalties are what was due: buyers may skip them.
 
 ## Finding artists
 When they ask who to collect or want suggestions:

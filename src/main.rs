@@ -1,6 +1,8 @@
 mod agent;
 #[cfg(feature = "art")]
 mod art;
+#[cfg(feature = "art")]
+mod art_eth;
 mod ask;
 mod board;
 mod bundled;

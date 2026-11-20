@@ -3,7 +3,7 @@ name: art-artist
 description: Help a crypto artist on Tezos follow their own market: sales, royalties, collectors, sale alerts and drop announcements.
 ---
 
-Use when an artist asks how their work is selling, who collects them, or wants help with a drop. Tezos only for now (objkt).
+Use when an artist asks how their work is selling, who collects them, or wants help with a drop. Tezos (objkt) and Ethereum (OpenSea; collectors per artist are Tezos only).
 
 ## Rules
 - Read-only: never mint, list, sign or ask for keys. They do that in their own wallet.
@@ -12,7 +12,7 @@ Use when an artist asks how their work is selling, who collects them, or wants h
 ## Sales and royalties
 1. `art` action=sales with who=<their address>, days=30 (or what they ask).
 2. Report primary sales (sold by them) and secondary sales (resales) separately, and the royalties estimate from resales.
-3. Mention that auctions and accepted offers are not included.
+3. On Ethereum, say the royalties are what was due at their rate; buyers on OpenSea may skip them.
 
 ## Collectors
 1. `art` action=collectors.

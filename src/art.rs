@@ -82,7 +82,7 @@ fn is_eth(s: &str) -> bool {
     (s.len() == 42 && s.starts_with("0x") && s[2..].chars().all(|c| c.is_ascii_hexdigit())) || s.ends_with(".eth")
 }
 
-const ETH_LATER: &str = "Ethereum isn't supported yet: it needs an OpenSea or Alchemy API key and is coming next. Tezos works now.";
+const ETH_LATER: &str = "that's an Ethereum target: ask again with chain=ethereum (or `--eth` on the command line)";
 
 /// mutez → "4.9 ꜩ"
 pub fn tez(mutez: i64) -> String {
@@ -465,7 +465,7 @@ pub fn piece(spec: &str) -> Result<String, String> {
 }
 
 /// A → B and later B → A among the sales of one token suggests trading to inflate the price.
-fn wash_pattern(sales: &[Value]) -> Option<String> {
+pub(crate) fn wash_pattern(sales: &[Value]) -> Option<String> {
     let pairs: Vec<(&str, &str)> =
         sales.iter().filter_map(|s| Some((s["seller_address"].as_str()?, s["buyer_address"].as_str()?))).collect();
     pairs
@@ -474,16 +474,21 @@ fn wash_pattern(sales: &[Value]) -> Option<String> {
         .then(|| "the same wallets sold this piece back and forth, which can be used to fake demand".to_string())
 }
 
-/// Asking price far above what the piece has sold for.
-fn outlier(sales: &[Value], ask: Option<i64>) -> Option<String> {
-    let ask = ask? as f64;
+/// Median per-edition sale price (same units as the sales), if there are enough sales to judge.
+pub(crate) fn median_unit(sales: &[Value]) -> Option<f64> {
     let mut prices: Vec<f64> =
         sales.iter().filter_map(|s| num(&s["unit_xtz"]).or_else(|| num(&s["price_xtz"])).map(|p| p as f64)).filter(|p| *p > 0.0).collect();
     if prices.len() < 3 {
         return None;
     }
     prices.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let median = prices[prices.len() / 2];
+    Some(prices[prices.len() / 2])
+}
+
+/// Asking price far above what the piece has sold for.
+fn outlier(sales: &[Value], ask: Option<i64>) -> Option<String> {
+    let ask = ask? as f64;
+    let median = median_unit(sales)?;
     (ask > median * 3.0).then(|| format!("the asking price is over 3× the median sale ({})", tez(median as i64)))
 }
 
@@ -729,13 +734,14 @@ pub fn lowest_ask(spec: &str) -> Result<Option<f64>, String> {
 pub fn tool_definition() -> Value {
     json!({ "type": "function", "function": {
         "name": "art",
-        "description": "Read-only crypto-art research (Tezos/objkt): artists, works, sales, royalties, collectors, a wallet's \
+        "description": "Read-only crypto-art research (Tezos/objkt; Ethereum/OpenSea with chain=ethereum or 0x… targets): artists, works, sales, royalties, collectors, a wallet's \
             collection, and checks before buying (provenance, edition, red flags). action=trending finds artists. Never buys; give \
             the objkt link. Not financial advice. action=watch sets a free alert: kind new|sold (who) or ask (piece, below).",
         "parameters": { "type": "object", "properties": {
             "action": { "type": "string", "enum": ["trending", "artist", "works", "piece", "look", "sales", "collectors", "holdings", "watch"] },
-            "who": { "type": "string", "description": "tz… address, .tez name or objkt username" },
-            "piece": { "type": "string", "description": "objkt link or KT1…/id" },
+            "chain": { "type": "string", "enum": ["tezos", "ethereum"] },
+            "who": { "type": "string", "description": "tz…/.tez/objkt name, or 0x…/OpenSea username" },
+            "piece": { "type": "string", "description": "objkt/OpenSea link, KT1…/id or 0x…/id" },
             "kind": { "type": "string", "enum": ["new", "sold", "ask"] },
             "below": { "type": "number", "description": "watch kind=ask: alert under this many tez" },
             "every_minutes": { "type": "integer", "description": "watch: how often (default 30)" },
@@ -748,6 +754,12 @@ pub fn tool_definition() -> Value {
 pub fn run_tool(home: &std::path::Path, a: &Value) -> Result<String, String> {
     let who = a["who"].as_str().unwrap_or("");
     let piece_arg = a["piece"].as_str().unwrap_or("");
+    let eth = a["chain"].as_str().is_some_and(|c| c.eq_ignore_ascii_case("ethereum") || c.eq_ignore_ascii_case("eth"))
+        || crate::art_eth::looks_eth(who)
+        || crate::art_eth::looks_eth(piece_arg);
+    if eth {
+        return run_eth(home, a, who, piece_arg);
+    }
     let n = a["limit"].as_u64().unwrap_or(10) as usize;
     // models sometimes leave out `action`: infer it from what they did pass
     let action = match a["action"].as_str().unwrap_or("") {
@@ -772,6 +784,53 @@ pub fn run_tool(home: &std::path::Path, a: &Value) -> Result<String, String> {
         "" => Err("say what to look up: action=artist, works, piece, sales, collectors, holdings or watch".into()),
         other => Err(format!("unknown art action `{other}`")),
     }
+}
+
+fn run_eth(home: &std::path::Path, a: &Value, who: &str, piece_arg: &str) -> Result<String, String> {
+    use crate::art_eth as e;
+    let n = a["limit"].as_u64().unwrap_or(10) as usize;
+    let spec = if piece_arg.is_empty() { who } else { piece_arg };
+    let action = match a["action"].as_str().unwrap_or("") {
+        "" if a["kind"].is_string() => "watch",
+        "" if e::parse_piece(spec).is_some() => "piece",
+        "" if !who.is_empty() => "artist",
+        x => x,
+    };
+    match action {
+        "trending" => e::trending(home, n),
+        "artist" => e::artist(home, who, n),
+        "works" => e::works(home, who, n),
+        "piece" => e::piece(home, spec),
+        "look" => e::look(home, spec),
+        "sales" => e::sales(home, who, a["days"].as_u64().unwrap_or(30)),
+        "collectors" => e::collectors(home, who),
+        "holdings" => e::holdings(home, who, n),
+        "watch" => watch_eth(home, a["kind"].as_str().unwrap_or(""), who, piece_arg, a["below"].as_f64(), a["every_minutes"].as_u64().unwrap_or(30)),
+        _ => Err("say what to look up: action=trending, artist, works, piece, look, sales, holdings or watch".into()),
+    }
+}
+
+fn watch_eth(home: &std::path::Path, kind: &str, who: &str, piece_spec: &str, below: Option<f64>, every: u64) -> Result<String, String> {
+    let every = every.clamp(5, 24 * 60);
+    let line = match kind {
+        "sold" => {
+            let w = who.trim();
+            if w.is_empty() {
+                return Err("watch kind=sold needs the artist (0x… address or OpenSea username)".into());
+            }
+            format!("`pagurus art eth-sold {w} {every}` > 0 a sale of {w}'s work on OpenSea")
+        }
+        "ask" => {
+            let (c, id) = crate::art_eth::parse_piece(if piece_spec.is_empty() { who } else { piece_spec })
+                .ok_or("watch kind=ask needs the piece (OpenSea link or 0x…/id)")?;
+            let below = below.filter(|b| *b > 0.0).ok_or("watch kind=ask needs `below`: the price in ETH")?;
+            format!("`pagurus art eth-ask {c}/{id}` < {below} https://opensea.io/item/ethereum/{c}/{id} listed under {below} ETH")
+        }
+        "new" => return Err("new-mint alerts aren't available for Ethereum yet; kind=sold and kind=ask are".into()),
+        _ => return Err("watch needs kind: sold or ask (new is Tezos only for now)".into()),
+    };
+    let added = crate::tasks::add(home, &line, Some(every), None, None)?;
+    Ok(format!("{added}\nIt runs every {every} min without the model and messages the user once when it triggers (the daemon must be running)."))
 }
 
 /// Write a correct zero-token check into HEARTBEAT.md: the look-back window equals
@@ -800,8 +859,8 @@ pub fn check(cmd: &str) -> Option<Result<String, String>> {
     let rest = cmd.trim().strip_prefix("pagurus art ")?;
     let args: Vec<String> = rest.split_whitespace().map(String::from).collect();
     match args.first().map(String::as_str) {
-        Some("new" | "sold" | "ask") => Some(cli(&args)),
-        _ => Some(Err("only `pagurus art new|sold|ask` can run as a check".into())),
+        Some("new" | "sold" | "ask" | "eth-sold" | "eth-ask") => Some(cli(&args)),
+        _ => Some(Err("only `pagurus art new|sold|ask|eth-sold|eth-ask` can run as a check".into())),
     }
 }
 
@@ -812,11 +871,32 @@ pub const USAGE: &str = "usage: pagurus art trending [days] [n]
   numbers for heartbeat checks (zero tokens):
        pagurus art new <artist> <minutes>     new works minted in the last N minutes
        pagurus art sold <artist> <minutes>    fixed-price sales in the last N minutes
-       pagurus art ask <piece>                lowest ask in tez (999999999 if not listed)";
+       pagurus art ask <piece>                lowest ask in tez (999999999 if not listed)
+  Ethereum (OpenSea): the same commands with an 0x… address, OpenSea username + --eth, or an OpenSea link;
+       pagurus art trending --eth · checks: pagurus art eth-sold <artist> <minutes> · pagurus art eth-ask <piece>";
 
 pub fn cli(args: &[String]) -> Result<String, String> {
+    let home = crate::util::home_dir();
+    let eth = args.iter().skip(1).any(|x| crate::art_eth::looks_eth(x)) || args.iter().any(|x| x == "--eth");
+    let args: Vec<String> = args.iter().filter(|x| *x != "--eth").cloned().collect();
     let a = |i: usize| args.get(i).map(String::as_str).unwrap_or("");
     let n = |i: usize, d: u64| args.get(i).and_then(|s| s.parse().ok()).unwrap_or(d);
+    if eth || a(0).starts_with("eth-") {
+        use crate::art_eth as e;
+        return match a(0) {
+            "trending" => e::trending(&home, n(1, 10) as usize),
+            "artist" => e::artist(&home, a(1), n(2, 6) as usize),
+            "works" => e::works(&home, a(1), n(2, 20) as usize),
+            "sales" => e::sales(&home, a(1), n(2, 30)),
+            "holdings" => e::holdings(&home, a(1), n(2, 20) as usize),
+            "collectors" => e::collectors(&home, a(1)),
+            "piece" => e::piece(&home, &args[1..].join(" ")),
+            "look" => e::look(&home, &args[1..].join(" ")),
+            "eth-sold" | "sold" => e::sold_count(&home, a(1), n(2, 60)).map(|c| c.to_string()),
+            "eth-ask" | "ask" => e::lowest_ask(&home, &args[1..].join(" ")).map(|p| p.map_or("999999999".into(), |v| format!("{v}"))),
+            _ => Err(USAGE.into()),
+        };
+    }
     match a(0) {
         "trending" => trending(n(1, 7), n(2, 10) as usize),
         "artist" => artist(a(1), n(2, 10) as usize),
