@@ -3,6 +3,8 @@ mod agent;
 mod art;
 #[cfg(feature = "art")]
 mod art_eth;
+#[cfg(feature = "art")]
+mod art_find;
 mod ask;
 mod board;
 mod bundled;

@@ -11,10 +11,14 @@ Use when someone asks about an artist, a piece, a collection or whether somethin
 - Say where data comes from (objkt or OpenSea). On Ethereum, royalties are what was due: buyers may skip them.
 
 ## Finding artists
-When they ask who to collect or want suggestions:
-1. `art` action=trending (days=7, or 30 for a calmer view): artists whose work sold to the most different collectors.
-2. Present a short list with why each stands out (many collectors, resales, price range), and say it's activity, not quality. Sales that are almost all resales can mean demand or hype: say both, and suggest a piece check.
-3. Ask what they like (style, price, editions vs 1/1s), then look up a few with action=artist.
+Match the request to the right search, and offer the others:
+- busy right now: action=trending (days=7, or 30; sort=volume for money)
+- quiet or overlooked (sold before, silent now): action=quiet
+- new names: action=new · a style: action=style, tag=generative/pixelart/photography…
+- "like X": action=similar, who=X (shared collectors)
+- a name they half remember: action=search
+Present a short list with what stands out, say it's activity, not quality (mostly resales can be hype), ask what they
+like, then look a few up with action=artist.
 
 ## An artist
 1. `art` action=artist with their tz… address, .tez name or objkt username.

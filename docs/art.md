@@ -12,7 +12,8 @@ valid 7 days, renewed automatically) and stores it in `~/.pagurus/env`. Your own
 
 ## Ask in plain words
 
-- "Which Tezos artists should I look at?"
+- "Which Tezos artists should I look at?" · "Show me artists who went quiet" · "New generative artists?"
+- "Who is collected by the same people as ilan_katin?"
 - "Tell me about the artist oinky.tez"
 - "Is this a safe buy? https://objkt.com/tokens/KT1…/182"
 - "Who collects my work?" (after telling it your address)
@@ -37,7 +38,13 @@ No red flags means nothing obvious showed up, not that a piece is safe.
 ## Commands
 
 ```sh
-pagurus art trending [days] [n]       # artists selling to the most different collectors lately
+pagurus art trending [days] [n] [volume]   # most different collectors (or volume) lately
+pagurus art quiet [silent-days] [n]        # sold to 3+ collectors in the past year, no sales since
+pagurus art newcomers [started-days] [n]   # first mint recently, already 2+ collectors
+pagurus art style <tag> [days] [n]         # e.g. generative, pixelart, photography
+pagurus art similar <who> [n]              # collected by the same people
+pagurus art search <name>                  # username, .tez name or X handle; "a/b" tries both
+pagurus art collection <KT1…>              # a collection by its contract
 pagurus art artist <who> [n]          # profile, recent works, sales of the last 90 days
 pagurus art works <who> [n]           # works, newest first
 pagurus art sales <who> [days]        # primary and secondary sales, royalties estimate
@@ -47,7 +54,7 @@ pagurus art piece <objkt link | KT1…/id>
 pagurus art look <objkt link | KT1…/id>   # fetch the preview image
 ```
 
-`<who>` is a tz… address, a `.tez` name or an objkt username, or for Ethereum an 0x… address or OpenSea username
+`<who>` is a tz… address, a `.tez` name, an objkt username or X handle (matched loosely), or for Ethereum an 0x… address or OpenSea username
 (add `--eth` to an OpenSea username). Ethereum alerts: `pagurus art eth-sold <artist> <minutes>`, `pagurus art eth-ask <piece>`.
 
 ## Alerts that cost nothing

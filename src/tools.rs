@@ -1918,8 +1918,8 @@ mod defsize {
         cfg.tools.web = true;
         cfg.tools.shell = "ask".into();
         let total: usize = super::definitions(&cfg, super::Set::Full).as_array().unwrap().iter().map(|d| d.to_string().len()).sum();
-        // the uge build adds its own tools (art for Tezos and Ethereum: ~1k) on top of the small build's budget
-        let budget = if cfg!(feature = "art") { 13_100 } else { 12_000 };
+        // the uge build adds its own tools (art for Tezos and Ethereum with discovery: ~1.3k) on top of the small build's budget
+        let budget = if cfg!(feature = "art") { 13_400 } else { 12_000 };
         assert!(total <= budget, "tool definitions grew to {total} chars");
     }
 }
