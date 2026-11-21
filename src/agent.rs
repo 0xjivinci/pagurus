@@ -38,6 +38,11 @@ pub struct Agent {
     /// Messages the user sent while a turn runs (Telegram): the daemon adds
     /// them, the turn reads them after each tool round.
     pub inbox: Inbox,
+    /// Tool output before this history index is cut to a stub even inside the
+    /// running turn. Raised in one jump when a long turn outgrows
+    /// agent.context_chars, so the start of the request stays the same for many
+    /// rounds afterwards (provider prompt caches keep hitting).
+    trim_upto: std::cell::Cell<usize>,
     /// Background work (board tasks, peer requests, parallel sub-agents):
     /// leaves the shared learning origin to the conversation it isn't part of.
     detached: bool,
@@ -113,7 +118,7 @@ impl Agent {
         let _ = std::fs::create_dir_all(home.join("workspace"));
         let system = system_prompt(&home, &cfg);
         let session = Session::new(&home, kind);
-        Ok(Self { home, cfg, llm, bg, session, system, history: Vec::new(), summary: String::new(), pins: Vec::new(), interactive, set: Set::Full, taint: String::new(), last_skills: Vec::new(), feedback: Vec::new(), turns_since_review: 0, tools_since_review: 0, inbox: Inbox::default(), detached: false })
+        Ok(Self { home, cfg, llm, bg, session, system, history: Vec::new(), summary: String::new(), pins: Vec::new(), interactive, set: Set::Full, taint: String::new(), last_skills: Vec::new(), feedback: Vec::new(), turns_since_review: 0, tools_since_review: 0, inbox: Inbox::default(), trim_upto: Default::default(), detached: false })
     }
 
     fn push(&mut self, m: Msg) {
@@ -127,6 +132,7 @@ impl Agent {
     fn trimmed(&self) -> Vec<Msg> {
         let users: Vec<usize> = self.history.iter().enumerate().filter(|(_, m)| m.role == "user").map(|(i, _)| i).collect();
         let recent = if users.len() >= 2 { users[users.len() - 2] } else { 0 };
+        let upto = self.trim_upto.get().min(self.history.len());
         self.history
             .iter()
             .enumerate()
@@ -135,7 +141,7 @@ impl Agent {
                 if i < recent && !m.images.is_empty() {
                     // an image costs ~1k tokens each time it's sent: keep it only for its own exchange and the next
                     Msg { images: vec![], content: Some(format!("{c} [image no longer attached]")), ..m.clone() }
-                } else if i < recent && m.role == "tool" && c.chars().count() > OLD_TOOL_CHARS {
+                } else if (i < recent || i < upto) && m.role == "tool" && c.chars().count() > OLD_TOOL_CHARS {
                     let head: String = c.chars().take(OLD_TOOL_CHARS).collect();
                     Msg { content: Some(format!("{head}… [older output trimmed; run the tool again if you need it]")), ..m.clone() }
                 } else {
@@ -146,7 +152,10 @@ impl Agent {
     }
 
     fn window(&self) -> Vec<Msg> {
-        let msgs = self.trimmed();
+        let mut msgs = self.trimmed();
+        if self.trim_turn(&msgs) {
+            msgs = self.trimmed();
+        }
         let max = self.cfg.agent.max_history.max(4);
         let start = start_for(&msgs, max + max / 2, self.cfg.agent.context_chars);
         let mut v = Vec::with_capacity(msgs.len() - start + 3);
@@ -159,6 +168,35 @@ impl Agent {
         }
         v.extend_from_slice(&msgs[start..]);
         v
+    }
+
+    /// A long turn (a coding task: many file reads and command runs) is never
+    /// cut by the window, which always keeps everything since the user's message.
+    /// When it outgrows agent.context_chars, cut its older tool output to stubs
+    /// down to about half the budget, in one jump. The newest round stays whole.
+    fn trim_turn(&self, msgs: &[Msg]) -> bool {
+        let Some(turn) = msgs.iter().rposition(|m| m.role == "user") else { return false };
+        let budget = self.cfg.agent.context_chars.max(4000);
+        if msgs[turn..].iter().map(msg_chars).sum::<usize>() <= budget {
+            return false;
+        }
+        let newest_round = msgs.iter().rposition(|m| m.role == "assistant").unwrap_or(msgs.len()).max(turn);
+        // keep about half the budget whole, counted from the end (the newest round
+        // included), so the next few rounds fit before the cut has to move again
+        let (mut total, mut upto) = (0, turn);
+        for i in (turn..msgs.len()).rev() {
+            total += msg_chars(&msgs[i]);
+            if total > budget / 2 {
+                upto = i + 1;
+                break;
+            }
+        }
+        let upto = upto.min(newest_round);
+        if upto <= self.trim_upto.get() {
+            return false;
+        }
+        self.trim_upto.set(upto);
+        true
     }
 
     fn context_note(&self) -> Option<String> {
@@ -227,6 +265,7 @@ impl Agent {
         let i = self.history.iter().rposition(|m| m.role == "user")?;
         let text = self.history[i].content.clone();
         self.history.truncate(i);
+        self.trim_upto.set(self.trim_upto.get().min(i));
         self.session.append(&Msg::system("[the user undid the last exchange]"));
         text
     }
@@ -611,6 +650,7 @@ impl Agent {
             }
         }
         self.history.drain(..start);
+        self.trim_upto.set(self.trim_upto.get().saturating_sub(start));
     }
 
     /// Hermes-style nudge: every N turns or N tool calls, run a reflection pass.
@@ -1614,6 +1654,43 @@ pub(crate) mod tests {
         assert!(lens[0] < 500, "oldest tool output trimmed");
         assert_eq!(lens[1], 2000, "last two user turns untouched");
         assert_eq!(lens[2], 2000);
+    }
+
+    #[test]
+    fn a_long_turn_trims_its_older_tool_output_in_one_jump() {
+        let mut a = agent();
+        a.cfg.agent.context_chars = 10_000;
+        a.history.push(Msg::user("fix the build"));
+        let round = |a: &mut super::Agent, n: usize| {
+            let call = crate::llm::ToolCall {
+                id: format!("c{n}"),
+                kind: "function".into(),
+                function: crate::llm::FnCall { name: "read_file".into(), arguments: "{}".into() },
+                extra: Default::default(),
+            };
+            a.history.push(Msg { role: "assistant".into(), tool_calls: Some(vec![call]), ..Default::default() });
+            a.history.push(Msg::tool(&format!("c{n}"), &format!("{n}:{}", "x".repeat(2000))));
+        };
+        for n in 0..4 {
+            round(&mut a, n);
+        }
+        let w = a.window();
+        assert!(w.iter().filter(|m| m.role == "tool").all(|m| super::msg_chars(m) > 2000), "under budget: untouched");
+        for n in 4..8 {
+            round(&mut a, n);
+        }
+        let w = a.window();
+        let tools: Vec<usize> = w.iter().filter(|m| m.role == "tool").map(super::msg_chars).collect();
+        assert_eq!(tools.len(), 8, "nothing dropped, the request stays");
+        assert!(tools[0] < 500 && tools[7] > 2000, "old output cut, newest round whole: {tools:?}");
+        assert_eq!(w[1].content.as_deref(), Some("fix the build"));
+        let total: usize = w.iter().skip(1).map(super::msg_chars).sum();
+        assert!(total <= 10_000, "{total}");
+        // the next round under budget doesn't move the cut: the request prefix stays the same
+        let before: Vec<String> = w.iter().map(|m| m.content.clone().unwrap_or_default()).collect();
+        round(&mut a, 8);
+        let after: Vec<String> = a.window().iter().map(|m| m.content.clone().unwrap_or_default()).collect();
+        assert_eq!(&after[..before.len()], &before[..], "cache-friendly: earlier messages unchanged");
     }
 
     #[test]
