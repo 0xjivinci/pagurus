@@ -419,6 +419,20 @@ impl Llm {
     /// a rate-limited or failing model is skipped for a while (cooldown), by
     /// every agent in this process.
     pub fn chat(&self, msgs: &[Msg], tools: &Value) -> Result<Msg, String> {
+        let first = self.chat_routes(msgs, tools);
+        // A server that can't take one of the images (a format it can't decode,
+        // too big, or no vision) fails the whole request. Send it again without
+        // images, so the turn goes on and the model knows why it can't see them.
+        match first {
+            Err(e) if msgs.iter().any(|m| !m.images.is_empty()) && image_refused(&e) => {
+                let plain: Vec<Msg> = msgs.iter().map(without_images).collect();
+                self.chat_routes(&plain, tools).map_err(|e2| format!("{e2} (first try, with images: {e})"))
+            }
+            r => r,
+        }
+    }
+
+    fn chat_routes(&self, msgs: &[Msg], tools: &Value) -> Result<Msg, String> {
         let deadline = Instant::now() + Duration::from_secs(self.p.call_budget_secs.max(10));
         let mut errors = Vec::new();
         let mut dead: Vec<&str> = Vec::new();
@@ -471,7 +485,7 @@ impl Llm {
     /// One model. Server errors get one quick retry; a rate limit moves on at
     /// once (honouring Retry-After for the cooldown).
     fn chat_model(&self, r: &Route, msgs: &[Msg], tools: &Value, left: Duration) -> Result<Msg, Fail> {
-        let body = match r.api {
+        let mut body = match r.api {
             Api::Anthropic => anthropic::body(&r.model, self.p.max_tokens, msgs, tools),
             Api::OpenAi => {
                 let mut wired: Vec<Value> = msgs.iter().map(wire).collect();
@@ -490,6 +504,10 @@ impl Llm {
                 body
             }
         };
+        if r.api == Api::OpenAi && webp_as_png(&r.url) {
+            relabel_webp(&mut body);
+        }
+        let mut relabelled = false;
         let started = Instant::now();
         let mut last = String::new();
         for attempt in 0..2u32 {
@@ -521,6 +539,9 @@ impl Llm {
                                     && msg.tool_calls.as_ref().is_none_or(|t| t.is_empty());
                                 if empty && finish.as_deref() == Some("length") {
                                     return Err(self.out_of_tokens());
+                                }
+                                if relabelled {
+                                    remember_webp_as_png(&r.url);
                                 }
                                 let mut msg = msg;
                                 if finish.as_deref() == Some("length") {
@@ -586,6 +607,9 @@ impl Llm {
                     if length {
                         mark_cut(&mut msg, self.p.max_tokens);
                     }
+                    if relabelled {
+                        remember_webp_as_png(&r.url);
+                    }
                     return Ok(msg);
                 }
                 Err(ureq::Error::Status(code, resp)) => {
@@ -601,6 +625,12 @@ impl Llm {
                         // Anthropic: overloaded. Another model is a better bet than a retry.
                         529 => return Err(Fail { msg: last, fatal: false, cool: retry_after.unwrap_or(60).clamp(30, 3600) }),
                         500..=599 => continue,
+                        // LM Studio refuses the image/webp label but reads the same bytes
+                        // under another one: try that once, and remember it for this server
+                        400 if !relabelled && r.api == Api::OpenAi && relabel_webp(&mut body) => {
+                            relabelled = true;
+                            continue;
+                        }
                         _ => return Err(Fail::soft(last)), // 400/404 can be model-specific: try the next one
                     }
                 }
@@ -628,6 +658,54 @@ impl Llm {
             self.p.max_tokens
         ))
     }
+}
+
+/// Model servers that take WebP images only under another label (LM Studio).
+static WEBP_AS_PNG: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+fn webp_as_png(url: &str) -> bool {
+    WEBP_AS_PNG.lock().is_ok_and(|v| v.iter().any(|u| u == url))
+}
+
+fn remember_webp_as_png(url: &str) {
+    if let Ok(mut v) = WEBP_AS_PNG.lock() {
+        if !v.iter().any(|u| u == url) {
+            v.push(url.to_string());
+        }
+    }
+}
+
+/// Relabel the request's WebP images as PNG (the bytes stay WebP). False when there were none.
+fn relabel_webp(body: &mut Value) -> bool {
+    let mut any = false;
+    for m in body["messages"].as_array_mut().into_iter().flatten() {
+        for part in m["content"].as_array_mut().into_iter().flatten() {
+            if let Some(u) = part["image_url"]["url"].as_str().and_then(|u| u.strip_prefix("data:image/webp;")) {
+                part["image_url"]["url"] = json!(format!("data:image/png;{u}"));
+                any = true;
+            }
+        }
+    }
+    any
+}
+
+/// An error that a request's images probably caused (not a key, quota or network problem).
+fn image_refused(e: &str) -> bool {
+    let l = e.to_lowercase();
+    (l.contains("http 400") || l.contains("http 413") || l.contains("http 422")) || (l.contains("image") && !l.contains("http 401"))
+}
+
+fn without_images(m: &Msg) -> Msg {
+    if m.images.is_empty() {
+        return m.clone();
+    }
+    let n = m.images.len();
+    let note = format!(
+        "[{n} image(s) left out: the model server rejected them (an unsupported format or size, or a model without vision). \
+         Say so if it matters; don't describe what you couldn't see.]"
+    );
+    let c = m.content.as_deref().unwrap_or("");
+    Msg { images: vec![], content: Some(if c.is_empty() { note } else { format!("{c}\n{note}") }), ..m.clone() }
 }
 
 /// The reply hit max_tokens: its tool calls are probably incomplete (a big
@@ -859,6 +937,38 @@ mod tests {
         broken.tool_calls.as_mut().unwrap()[0].function.arguments = "{\"path\":\"ma".into();
         assert_eq!(super::wire(&broken)["tool_calls"][0]["function"]["arguments"], "{}");
         assert_eq!(super::wire(&m)["tool_calls"][0]["function"]["arguments"], args.as_str());
+    }
+
+    #[test]
+    fn a_refused_image_is_dropped_and_the_request_sent_again() {
+        let refused = br#"{"error":"'url' field must be a base64 encoded image."}"#;
+        let ok = br#"{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"I couldn't see it."}}]}"#;
+        let (port, rx) = serve(vec![("400 Bad Request", refused.to_vec()), ("200 OK", ok.to_vec())]);
+        let p: crate::config::Provider = toml::from_str(&format!("base_url = \"http://127.0.0.1:{port}/v1\"\nmodel = \"m\"")).unwrap();
+        let msgs = [super::Msg::user_with_images("what is this?", vec!["data:image/png;base64,iVBORw==".into()])];
+        let m = super::Llm::new(&p).unwrap().chat(&msgs, &serde_json::json!([])).unwrap();
+        assert_eq!(m.content.as_deref(), Some("I couldn't see it."));
+        let first = body_of(&rx.recv().unwrap());
+        assert_eq!(first["messages"][0]["content"][1]["type"], "image_url");
+        let second = body_of(&rx.recv().unwrap());
+        let text = second["messages"][0]["content"].as_str().unwrap();
+        assert!(text.starts_with("what is this?") && text.contains("image(s) left out"), "{text}");
+    }
+
+    #[test]
+    fn webp_refused_by_label_is_relabelled_once_and_remembered() {
+        let refused = br#"{"error":"'url' field must be a base64 encoded image."}"#;
+        let ok = br#"{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"a crab"}}]}"#;
+        let (port, rx) = serve(vec![("400 Bad Request", refused.to_vec()), ("200 OK", ok.to_vec()), ("200 OK", ok.to_vec())]);
+        let p: crate::config::Provider = toml::from_str(&format!("base_url = \"http://127.0.0.1:{port}/v1\"\nmodel = \"m\"")).unwrap();
+        let llm = super::Llm::new(&p).unwrap();
+        let msgs = [super::Msg::user_with_images("what is this?", vec!["data:image/webp;base64,UklGRg==".into()])];
+        assert_eq!(llm.chat(&msgs, &serde_json::json!([])).unwrap().content.as_deref(), Some("a crab"));
+        let url = |req: String| body_of(&req)["messages"][0]["content"][1]["image_url"]["url"].as_str().unwrap().to_string();
+        assert!(url(rx.recv().unwrap()).starts_with("data:image/webp;"));
+        assert!(url(rx.recv().unwrap()).starts_with("data:image/png;base64,UklGRg"), "same bytes, another label");
+        llm.chat(&msgs, &serde_json::json!([])).unwrap();
+        assert!(url(rx.recv().unwrap()).starts_with("data:image/png;"), "remembered: no failed request first");
     }
 
     #[test]
