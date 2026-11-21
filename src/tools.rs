@@ -339,6 +339,13 @@ pub fn execute(ctx: &Ctx, set: Set, name: &str, raw: &str) -> String {
         Ok(v) => v,
         Err(e) => return format!("error: arguments are not valid JSON: {e}"),
     };
+    if let Some(n) = args.get(crate::llm::CUT) {
+        return format!(
+            "error: not run. Your reply reached the output limit (provider.max_tokens = {n}) before this call was \
+             complete. Send less per call: split the code into several smaller files, or write_file a first part \
+             and add the rest with edit_file, keeping each call well under the limit."
+        );
+    }
     let mut out = dispatch(ctx, name, &args).map(|o| strip_invisible(&o));
     if let Ok(text) = &mut out {
         if let Some(src) = outside_text(ctx, name, &args) {

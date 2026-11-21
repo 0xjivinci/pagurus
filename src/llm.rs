@@ -45,6 +45,16 @@ fn wire(m: &Msg) -> Value {
             v.as_object_mut().map(|o| o.remove("extra_content"));
         }
     }
+    // a cut-off call's arguments are broken JSON, and some servers (LM Studio)
+    // fail the whole request on them: send an empty object instead
+    if let Some(calls) = v.get_mut("tool_calls").and_then(Value::as_array_mut) {
+        for c in calls {
+            let ok = c["function"]["arguments"].as_str().is_some_and(|a| serde_json::from_str::<Value>(a).is_ok_and(|v| v.is_object()));
+            if !ok && c.get("function").is_some() {
+                c["function"]["arguments"] = json!("{}");
+            }
+        }
+    }
     if !m.images.is_empty() {
         let mut parts = vec![json!({ "type": "text", "text": crate::util::redact(m.content.as_deref().unwrap_or_default()) })];
         parts.extend(m.images.iter().map(|u| json!({ "type": "image_url", "image_url": { "url": u } })));
@@ -512,6 +522,10 @@ impl Llm {
                                 if empty && finish.as_deref() == Some("length") {
                                     return Err(self.out_of_tokens());
                                 }
+                                let mut msg = msg;
+                                if finish.as_deref() == Some("length") {
+                                    mark_cut(&mut msg, self.p.max_tokens);
+                                }
                                 return Ok(msg);
                             }
                             stream::Sse::Err(e) => {
@@ -550,6 +564,10 @@ impl Llm {
                         if cut && msg.tool_calls.is_none() && msg.content.as_deref().is_none_or(|c| c.trim().is_empty()) {
                             return Err(self.out_of_tokens());
                         }
+                        let mut msg = msg;
+                        if cut {
+                            mark_cut(&mut msg, self.p.max_tokens);
+                        }
                         return Ok(msg);
                     }
                     // some gateways answer 200 with an error object
@@ -557,12 +575,16 @@ impl Llm {
                         last = format!("no message in response: {}", clip(&v.to_string(), 300));
                         continue;
                     };
-                    let msg: Msg = serde_json::from_value(m).map_err(|e| Fail::soft(format!("unexpected message shape: {e}")))?;
+                    let mut msg: Msg = serde_json::from_value(m).map_err(|e| Fail::soft(format!("unexpected message shape: {e}")))?;
                     // reasoning models can spend the whole budget thinking and return nothing
                     let empty = msg.content.as_deref().is_none_or(|c| c.trim().is_empty())
                         && msg.tool_calls.as_ref().is_none_or(|t| t.is_empty());
-                    if empty && v.pointer("/choices/0/finish_reason").and_then(Value::as_str) == Some("length") {
+                    let length = v.pointer("/choices/0/finish_reason").and_then(Value::as_str) == Some("length");
+                    if empty && length {
                         return Err(self.out_of_tokens());
+                    }
+                    if length {
+                        mark_cut(&mut msg, self.p.max_tokens);
                     }
                     return Ok(msg);
                 }
@@ -607,6 +629,18 @@ impl Llm {
         ))
     }
 }
+
+/// The reply hit max_tokens: its tool calls are probably incomplete (a big
+/// write_file is the usual case). Don't run them; tell the model why instead
+/// (tools::execute answers `CUT` calls with that note).
+fn mark_cut(msg: &mut Msg, max_tokens: u32) {
+    for c in msg.tool_calls.iter_mut().flatten() {
+        c.function.arguments = json!({ CUT: max_tokens }).to_string();
+    }
+}
+
+/// Marks a tool call that was cut off by max_tokens (see `mark_cut`).
+pub const CUT: &str = "pagurus_cut_off";
 
 /// OpenRouter form of a prompt-cache breakpoint: the system prompt as text
 /// parts, `cache_control` on its stable start.
@@ -807,6 +841,24 @@ mod tests {
         assert_eq!(b["tools"][0]["cache_control"]["type"], "ephemeral");
         assert_eq!(b["messages"][0]["content"][0]["text"], "how long has it been up?");
         assert_eq!(super::usage_note(&serde_json::from_slice(reply).unwrap()).unwrap(), "2012 tokens in (2000 cached), 7 out");
+    }
+
+    #[test]
+    fn a_call_cut_off_by_max_tokens_is_not_run_and_never_sent_back_broken() {
+        let reply = br#"{"choices":[{"finish_reason":"length","message":{"role":"assistant","content":null,
+            "tool_calls":[{"id":"c1","type":"function","function":{"name":"write_file","arguments":"{\"path\":\"main.py\",\"content\":\"import"}}]}}]}"#;
+        let (port, _rx) = serve(vec![("200 OK", reply.to_vec())]);
+        let p: crate::config::Provider =
+            toml::from_str(&format!("base_url = \"http://127.0.0.1:{port}/v1\"\nmodel = \"m\"\nmax_tokens = 4096")).unwrap();
+        let m = super::Llm::new(&p).unwrap().chat(&[super::Msg::user("write it")], &serde_json::json!([])).unwrap();
+        let args = &m.tool_calls.as_ref().unwrap()[0].function.arguments;
+        let v: serde_json::Value = serde_json::from_str(args).unwrap();
+        assert_eq!(v[super::CUT], 4096, "{args}");
+        // a broken call from history goes out as {} (LM Studio answers 500 otherwise)
+        let mut broken = m.clone();
+        broken.tool_calls.as_mut().unwrap()[0].function.arguments = "{\"path\":\"ma".into();
+        assert_eq!(super::wire(&broken)["tool_calls"][0]["function"]["arguments"], "{}");
+        assert_eq!(super::wire(&m)["tool_calls"][0]["function"]["arguments"], args.as_str());
     }
 
     #[test]
