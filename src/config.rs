@@ -424,7 +424,8 @@ pub struct ToolsCfg {
     pub write_roots: Vec<String>,
     /// `web_fetch`: read one URL as text.
     pub web: bool,
-    /// The skills hub index (`pagurus skills search`): an https URL, or "off".
+    /// The skills hub index (`pagurus skills search`, uge): an https URL, or "off".
+    #[cfg(feature = "hub")]
     pub skills_hub: String,
 }
 
@@ -470,7 +471,8 @@ impl Default for ToolsCfg {
             shell_timeout_secs: 30,
             read_roots: vec!["/".into()],
             web: true,
-            skills_hub: crate::hub::HERMES_INDEX.into(),
+            #[cfg(feature = "hub")]
+            skills_hub: crate::hub_index::HERMES_INDEX.into(),
             write_roots: vec![],
         }
     }

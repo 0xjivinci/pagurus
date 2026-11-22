@@ -22,6 +22,8 @@ mod eval;
 mod files;
 mod floor;
 mod hub;
+#[cfg(feature = "hub")]
+mod hub_index;
 mod import;
 mod learn;
 mod llm;
@@ -170,16 +172,18 @@ fn run(args: &[String]) -> Result<(), String> {
             println!("{}", agent::curate(&home, &config::load(&home)?)?);
             Ok(())
         }
+        #[cfg(feature = "hub")]
         "skills" if args.get(1).is_some_and(|a| a == "search") => {
             let q = args[2..].join(" ");
             if q.trim().is_empty() {
                 return Err("usage: pagurus skills search <words>".into());
             }
-            print!("{}", hub::search_text(&home, &config::load(&home)?, &q, 12)?);
+            print!("{}", hub_index::search_text(&home, &config::load(&home)?, &q, 12)?);
             Ok(())
         }
+        #[cfg(feature = "hub")]
         "skills" if args.get(1).is_some_and(|a| a == "update") => {
-            let n = hub::refresh(&home, &config::load(&home)?)?;
+            let n = hub_index::refresh(&home, &config::load(&home)?)?;
             println!("skills hub index updated: {n} installable skills");
             Ok(())
         }

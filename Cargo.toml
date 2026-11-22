@@ -38,8 +38,10 @@ art = []
 tui = ["dep:libc"]
 # Coding: project mode with grep, glob, check (tests/build/lint) and a hardened git tool.
 code = []
+# Search and install from the skills hub (the public Hermes index).
+hub = []
 # "uge": the big build for laptops and servers: every optional feature.
-uge = ["sqlite", "art", "tui", "code"]
+uge = ["sqlite", "art", "tui", "code", "hub"]
 # The older name for the big build.
 full = ["uge"]
 

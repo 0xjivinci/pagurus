@@ -299,6 +299,7 @@ pub fn definitions(cfg: &Config, set: Set) -> Value {
         "Load the full instructions of a skill listed in the system prompt before following it.",
         json!({"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}),
     ));
+    #[cfg(feature = "hub")]
     if set == Set::Full && !matches!(cfg.tools.skills_hub.trim(), "" | "off") {
         v.push(def(
             "skill_hub",
@@ -638,8 +639,9 @@ fn dispatch(ctx: &Ctx, name: &str, a: &Value) -> Result<String, String> {
             let change = Change::SkillWrite { name: s(a, "name")?, description: s(a, "description")?, body: s(a, "body")? };
             learn::submit(ctx.home, ctx.cfg, change, &opt(a, "reason").unwrap_or_default(), ctx.session)
         }
+        #[cfg(feature = "hub")]
         "skill_hub" => match a["action"].as_str().unwrap_or("") {
-            "search" => crate::hub::search_text(ctx.home, ctx.cfg, &s(a, "query")?, 8),
+            "search" => crate::hub_index::search_text(ctx.home, ctx.cfg, &s(a, "query")?, 8),
             "install" => {
                 let p = crate::hub::prepare(ctx.home, ctx.cfg, &s(a, "id")?, false)?;
                 approve(ctx, "installing a skill changes pagurus's own instructions", &p.summary())?;
@@ -2085,7 +2087,7 @@ mod tests {
 mod defsize {
     /// Every tool description is sent with every model call: keep the total in check
     /// (it was 10.6k chars with every built-in tool on; raise this only on purpose:
-    /// 12k since the task board and parallel delegation; +400 for the skills hub).
+    /// 12k since the task board and parallel delegation; uge: +400 for the skills hub).
     #[test]
     fn tool_definitions_stay_small() {
         let mut cfg = crate::config::Config::default();
@@ -2093,7 +2095,7 @@ mod defsize {
         cfg.tools.shell = "ask".into();
         let total: usize = super::definitions(&cfg, super::Set::Full).as_array().unwrap().iter().map(|d| d.to_string().len()).sum();
         // the uge build adds its own tools (art for Tezos and Ethereum with discovery: ~1.3k) on top of the small build's budget
-        let budget = if cfg!(feature = "art") { 14_600 } else { 12_400 };
+        let budget = if cfg!(feature = "art") { 14_600 } else { 12_000 };
         assert!(total <= budget, "tool definitions grew to {total} chars");
     }
 }

@@ -16,7 +16,6 @@ pub const SKILLS: &[(&str, &str)] = &[
     ("research-report", include_str!("../skills-bundled/research-report/SKILL.md")),
     ("plan-a-project", include_str!("../skills-bundled/plan-a-project/SKILL.md")),
     ("summarize", include_str!("../skills-bundled/summarize/SKILL.md")),
-    ("find-a-skill", include_str!("../skills-bundled/find-a-skill/SKILL.md")),
 ];
 
 /// Skills that need an optional feature (the uge build).
@@ -25,6 +24,7 @@ pub const EXTRA: &[(&str, &str)] = &[
     ("art-collector", include_str!("../skills-bundled/art-collector/SKILL.md")),
     ("art-artist", include_str!("../skills-bundled/art-artist/SKILL.md")),
     ("art-taste", include_str!("../skills-bundled/art-taste/SKILL.md")),
+    ("find-a-skill", include_str!("../skills-bundled/find-a-skill/SKILL.md")),
     ("coding", include_str!("../skills-bundled/coding/SKILL.md")),
     ("debugging", include_str!("../skills-bundled/debugging/SKILL.md")),
     ("git-workflow", include_str!("../skills-bundled/git-workflow/SKILL.md")),
