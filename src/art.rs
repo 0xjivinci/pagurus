@@ -711,8 +711,42 @@ fn fetch_image(urls: &[String]) -> Result<Vec<u8>, String> {
     Err(format!("couldn't download the preview: {last}"))
 }
 
+/// Keep a looked-at preview as a file, so the agent can send it to the user
+/// (send_file) without downloading it again. The folder keeps the newest 40.
+pub(crate) fn keep_preview(home: &std::path::Path, name: &str, bytes: &[u8]) -> String {
+    let ext = match bytes {
+        [0x89, b'P', b'N', b'G', ..] => "png",
+        [0xFF, 0xD8, 0xFF, ..] => "jpg",
+        [b'G', b'I', b'F', b'8', ..] => "gif",
+        _ => "webp",
+    };
+    let mut slug: String = name.to_lowercase().chars().map(|c| if c.is_alphanumeric() { c } else { '-' }).collect();
+    while slug.contains("--") {
+        slug = slug.replace("--", "-");
+    }
+    let slug: String = slug.trim_matches('-').chars().take(60).collect();
+    let dir = home.join("workspace").join("art");
+    let file = dir.join(format!("{}.{ext}", if slug.is_empty() { "untitled" } else { &slug }));
+    if std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&file, bytes)).is_err() {
+        return String::new();
+    }
+    let mut old: Vec<(std::time::SystemTime, std::path::PathBuf)> = std::fs::read_dir(&dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
+        .collect();
+    if old.len() > 40 {
+        old.sort();
+        for (_, p) in &old[..old.len() - 40] {
+            let _ = std::fs::remove_file(p);
+        }
+    }
+    format!("\nSaved as {}: if the user wants the image, send it with send_file (don't download it again).", file.display())
+}
+
 /// Show the model a piece's preview image, so it can describe the art itself.
-pub fn look(spec: &str) -> Result<String, String> {
+pub fn look(home: &std::path::Path, spec: &str) -> Result<String, String> {
     let (c, id) = parse_piece(spec).ok_or("give the piece as an objkt link or KT1…/id")?;
     let q = "query($c: String!, $t: String!) { token(where: {fa_contract: {_eq: $c}, token_id: {_eq: $t}}) { name mime display_uri thumbnail_uri } }";
     let d = gql(q, json!({ "c": c, "t": id }))?;
@@ -735,9 +769,10 @@ pub fn look(spec: &str) -> Result<String, String> {
     crate::tools::show_image(format!("{name} ({})", piece_url(&c, &id)), data_url);
     Ok(format!(
         "The preview of \"{name}\" ({} KB, original format {}) is attached below for you to look at. Describe what you see; \
-         a preview can differ from the original (video, animation or interactive work).",
+         a preview can differ from the original (video, animation or interactive work).{}",
         bytes.len() / 1024,
-        t["mime"].as_str().unwrap_or("unknown")
+        t["mime"].as_str().unwrap_or("unknown"),
+        keep_preview(home, &name, &bytes)
     ))
 }
 
@@ -846,7 +881,7 @@ pub fn run_tool(home: &std::path::Path, a: &Value) -> Result<String, String> {
         "artist" => artist(who, n),
         "works" => works(who, n),
         "piece" => piece(if piece_arg.is_empty() { who } else { piece_arg }),
-        "look" => look(if piece_arg.is_empty() { who } else { piece_arg }),
+        "look" => look(home, if piece_arg.is_empty() { who } else { piece_arg }),
         "sales" => sales(who, a["days"].as_u64().unwrap_or(30)),
         "collectors" => collectors(who, n),
         "holdings" => holdings(who, n),
@@ -1003,7 +1038,7 @@ pub fn cli(args: &[String]) -> Result<String, String> {
         "collectors" => collectors(a(1), n(2, 20) as usize),
         "holdings" => holdings(a(1), n(2, 20) as usize),
         "piece" => piece(&args[1..].join(" ")),
-        "look" => look(&args[1..].join(" ")).map(|m| format!("{m}\n(in a chat the model sees the image; here only the download is checked)")),
+        "look" => look(&home, &args[1..].join(" ")).map(|m| format!("{m}\n(in a chat the model sees the image; here only the download is checked)")),
         "new" => new_count(a(1), n(2, 60)).map(|c| c.to_string()),
         "sold" => sold_count(a(1), n(2, 60)).map(|c| c.to_string()),
         "ask" => lowest_ask(&args[1..].join(" ")).map(|p| p.map_or("999999999".into(), |t| format!("{t}"))),

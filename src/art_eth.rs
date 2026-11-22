@@ -402,7 +402,8 @@ pub fn look(home: &Path, spec: &str) -> Result<String, String> {
         format!("the preview is {kind}, which pagurus can't show to the model; open {} to see it", item_url(&c, &id))
     })?;
     crate::tools::show_image(format!("{name} ({})", item_url(&c, &id)), data_url);
-    Ok(finish(format!("The preview of \"{name}\" ({} KB) is attached below for you to look at. Describe what you see.", buf.len() / 1024), note))
+    let kept = crate::art::keep_preview(home, &name, &buf);
+    Ok(finish(format!("The preview of \"{name}\" ({} KB) is attached below for you to look at. Describe what you see.{kept}", buf.len() / 1024), note))
 }
 
 pub fn holdings(home: &Path, who_s: &str, n: usize) -> Result<String, String> {

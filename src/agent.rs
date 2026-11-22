@@ -351,6 +351,8 @@ impl Agent {
         let mut viewed: Vec<String> = Vec::new();
         let mut failed_after = false;
         let mut progress = Progress::default();
+        // "here's the image, sending it now" without a send_file call: catch it once
+        let (mut sent_file, mut claim_checked) = (false, false);
         let mut forced = None;
         for round in 1..=rounds {
             if crate::util::cancelled() {
@@ -390,9 +392,21 @@ impl Agent {
                         continue;
                     }
                 }
+                if !sent_file && !claim_checked && round < rounds && claims_sending(&text) {
+                    claim_checked = true;
+                    self.push(Msg::user(
+                        "[pagurus: your answer says a file or image is being sent, but you haven't called send_file in this \
+                         turn, so nothing reached the user. Call send_file now with the file's path, or, if you can't, \
+                         correct your answer. Never say something was sent unless send_file succeeded.]",
+                    ));
+                    continue;
+                }
                 self.turns_since_review += 1;
                 self.settle_skills(viewed, !failed_after);
                 return Ok(text);
+            }
+            if calls.iter().any(|c| c.function.name == "send_file") {
+                sent_file = true;
             }
             if self.interactive && !streamed && !text.trim().is_empty() {
                 eprintln!("{}", text.trim());
@@ -1110,6 +1124,18 @@ fn msg_chars(m: &Msg) -> usize {
         + m.tool_calls.iter().flatten().map(|t| t.function.arguments.len() + t.function.name.len()).sum::<usize>()
 }
 
+/// Does this answer say it is sending the user a file or picture right now?
+fn claims_sending(text: &str) -> bool {
+    let t = text.to_lowercase();
+    [
+        "sending it to you", "sending it now", "sending you", "sent you", "i've sent", "i have sent", "here it is attached",
+        "attached below", "i'm attaching", "i am attaching", "attached the", "sending the image", "sending the file",
+        "sending the pdf", "i'll send it now", "sent it to you", "sent the image", "sent the file",
+    ]
+    .iter()
+    .any(|p| t.contains(p))
+}
+
 /// First message to keep so that at most `max_msgs` messages and about
 /// `max_chars` characters remain. Always starts on a user message (never
 /// splits a tool exchange) and never drops the latest user message.
@@ -1692,6 +1718,15 @@ pub(crate) mod tests {
         round(&mut a, 8);
         let after: Vec<String> = a.window().iter().map(|m| m.content.clone().unwrap_or_default()).collect();
         assert_eq!(&after[..before.len()], &before[..], "cache-friendly: earlier messages unchanged");
+    }
+
+    #[test]
+    fn claims_of_sending_a_file_are_recognised() {
+        assert!(super::claims_sending("I downloaded the image to my workspace and am sending it to you now."));
+        assert!(super::claims_sending("Done, I've sent the PDF."));
+        assert!(!super::claims_sending("Want me to send you the image?"));
+        assert!(!super::claims_sending("I can send it if you like."));
+        assert!(!super::claims_sending("The piece sold for 9 tez."));
     }
 
     #[test]
