@@ -6,22 +6,26 @@
 set -eu
 cd "$(dirname "$0")/.."
 BUDGET=3670016 # 3.5 MiB: the binary must stay tiny (same as build-release.sh)
+# the containers have no git: stamp the build from here (see build.rs)
+PAGURUS_COMMIT=$(git rev-parse --short=7 HEAD 2>/dev/null || true)
+PAGURUS_DATE=$(git log -1 --format=%cs 2>/dev/null || true)
+export PAGURUS_COMMIT PAGURUS_DATE
 mkdir -p dist
 
 echo "== aarch64 (Pi 3/4/5, 64-bit OS)"
-docker run --rm -v "$PWD":/src -v pagurus-cargo:/usr/local/cargo/registry -e CARGO_TARGET_DIR=/src/target-linux \
+docker run --rm -e PAGURUS_COMMIT -e PAGURUS_DATE -v "$PWD":/src -v pagurus-cargo:/usr/local/cargo/registry -e CARGO_TARGET_DIR=/src/target-linux \
   -w /src rust:1-slim-bookworm sh -c 'cargo test --release -q 2>&1 | grep "test result"; cargo build --release -q'
 cp target-linux/release/pagurus dist/pagurus-aarch64-linux
 
 echo "== armv6 static (Pi Zero / Zero W / Pi 1; also runs on any 32-bit Pi OS)"
-docker run --rm -v "$PWD":/src -v pagurus-cargo-armv6:/root/.cargo/registry -e CARGO_TARGET_DIR=/src/target-armv6 \
+docker run --rm -e PAGURUS_COMMIT -e PAGURUS_DATE -v "$PWD":/src -v pagurus-cargo-armv6:/root/.cargo/registry -e CARGO_TARGET_DIR=/src/target-armv6 \
   -w /src messense/rust-musl-cross:arm-musleabihf sh -c \
   'cargo build --release -q --target arm-unknown-linux-musleabihf && cargo test --release -q --target arm-unknown-linux-musleabihf --no-run &&
    ls -t target-armv6/arm-unknown-linux-musleabihf/release/deps/pagurus-* | grep -v "\\." | head -1 > target-armv6/testbin.txt'
 cp target-armv6/arm-unknown-linux-musleabihf/release/pagurus dist/pagurus-armv6-linux
 
 echo "== ARM1176 check under QEMU (an ARMv7 instruction would SIGILL here)"
-docker run --rm -v "$PWD":/src -w /src rust:1-slim-bookworm sh -c \
+docker run --rm -e PAGURUS_COMMIT -e PAGURUS_DATE -v "$PWD":/src -w /src rust:1-slim-bookworm sh -c \
   'apt-get update -qq >/dev/null && apt-get install -y -qq qemu-user ca-certificates >/dev/null &&
    test -s target-armv6/testbin.txt &&
    qemu-arm -cpu arm1176 "$(cat target-armv6/testbin.txt)" 2>&1 | grep "test result" &&

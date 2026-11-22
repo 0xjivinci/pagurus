@@ -226,7 +226,8 @@ impl Agent {
     /// `/status` in the terminal.
     pub fn status_text(&self, tokens: (u64, u64)) -> String {
         format!(
-            "model       {}\nbackground  {}\ncontext     {}% of {} chars · {} messages{}\ntokens      {} in · {} out this session\nlearning    {} · autonomy {} · yolo {}\nsession     {}",
+            "version     {}\nmodel       {}\nbackground  {}\ncontext     {}% of {} chars · {} messages{}\ntokens      {} in · {} out this session\nlearning    {} · autonomy {} · yolo {}\nsession     {}",
+            crate::util::version(),
             self.cfg.provider.model,
             self.cfg.background().provider.model,
             self.context_percent(),
@@ -1161,7 +1162,7 @@ fn about(cfg: &Config, home: &std::path::Path) -> String {
          - You cannot install software, use sudo, or edit cron or system services yourself. Reminders and monitoring go \
            through the heartbeat tool (repeating checks or one-off reminders at a time).\n\
          - Hermes Agent (Nous Research, Python) inspired your memory and skills.\n",
-        env!("CARGO_PKG_VERSION"),
+        crate::util::version(),
         p.model,
         host(&p.base_url),
         {
@@ -1347,7 +1348,7 @@ pub fn repl(home: PathBuf, cfg: Config) -> Result<(), String> {
     let mut a = Agent::new(home.clone(), cfg.clone(), true, "cli")?;
     let rich = crate::ui::start();
     a.llm.set_live(rich);
-    println!("pagurus {} · {model} · learning: {} · /help", env!("CARGO_PKG_VERSION"), cfg.learning.mode);
+    println!("pagurus {} · {model} · learning: {} · /help", crate::util::version(), cfg.learning.mode);
     if let Some(news) = learn::news(&home) {
         println!("{news} — /learn to see it");
     }

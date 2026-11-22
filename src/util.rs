@@ -216,6 +216,17 @@ pub fn tail(s: &str, max: usize) -> String {
     format!("[…]{}", s.chars().skip(n - max).collect::<String>())
 }
 
+/// "0.2.0-dev (uge, 31f947e, 2026-11-22)": the version, which build, and the
+/// commit it was built from (see build.rs). Plain version where it's unknown.
+pub fn version() -> &'static str {
+    static V: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    V.get_or_init(|| {
+        let kind = if cfg!(feature = "art") { "uge" } else { "smol" };
+        let parts: Vec<&str> = [kind, env!("PAGURUS_COMMIT"), env!("PAGURUS_DATE")].into_iter().filter(|s| !s.is_empty()).collect();
+        format!("{} ({})", env!("CARGO_PKG_VERSION"), parts.join(", "))
+    })
+}
+
 pub fn one_line(s: &str, max: usize) -> String {
     clip(&s.split_whitespace().collect::<Vec<_>>().join(" "), max)
 }

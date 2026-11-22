@@ -190,7 +190,7 @@ fn run(args: &[String]) -> Result<(), String> {
             Ok(())
         }
         "version" | "-V" | "--version" => {
-            println!("pagurus {}", env!("CARGO_PKG_VERSION"));
+            println!("pagurus {}", crate::util::version());
             Ok(())
         }
         _ => Err(format!("unknown command `{cmd}`\n\n{USAGE}")),
@@ -262,7 +262,7 @@ fn doctor(home: &Path) -> Result<(), String> {
     let (n, bytes) = std::fs::read_dir(home.join("sessions"))
         .map(|rd| rd.filter_map(|e| e.ok()?.metadata().ok()).fold((0, 0), |(n, b), m| (n + 1, b + m.len())))
         .unwrap_or((0, 0));
-    println!("pagurus {}  ·  home {}", env!("CARGO_PKG_VERSION"), home.display());
+    println!("pagurus {}  ·  home {}", crate::util::version(), home.display());
     println!("{}model      {}", ok(!cfg.provider.model.is_empty()), if cfg.provider.model.is_empty() { "(unset)" } else { &cfg.provider.model });
     println!("   endpoint   {}", cfg.provider.base_url);
     if !cfg.provider.fallback_models.is_empty() {

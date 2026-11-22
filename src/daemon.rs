@@ -766,7 +766,7 @@ impl Daemon {
         let cooling = crate::llm::cooldowns();
         format!(
             "pagurus {} · up {}h{:02}m · model {}\nworker: {}\ncooling down: {}\nunsent messages: {}\nstanding tasks: {} · learning {} · memory {} KiB",
-            env!("CARGO_PKG_VERSION"),
+            crate::util::version(),
             up / 3600,
             (up % 3600) / 60,
             self.cfg.provider.model,

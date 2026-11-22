@@ -1,6 +1,6 @@
 [package]
 name = "pagurus"
-version = "0.1.0"
+version = "0.2.0-dev"
 edition = "2021"
 description = "A small, self-improving personal AI agent in one binary, inspired by Hermes Agent: memory, self-written skills, scheduled checks"
 license = "MIT OR Apache-2.0"
