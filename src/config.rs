@@ -427,6 +427,9 @@ pub struct ToolsCfg {
     /// The skills hub index (`pagurus skills search`, uge): an https URL, or "off".
     #[cfg(feature = "hub")]
     pub skills_hub: String,
+    /// Browser automation (uge): "auto" finds Chromium/Chrome/Brave, a path picks one, "off" disables it.
+    #[cfg(feature = "browser")]
+    pub browser: String,
 }
 
 /// Read-only commands that run without asking (also joined with | and &&).
@@ -473,6 +476,8 @@ impl Default for ToolsCfg {
             web: true,
             #[cfg(feature = "hub")]
             skills_hub: crate::hub_index::HERMES_INDEX.into(),
+            #[cfg(feature = "browser")]
+            browser: "auto".into(),
             write_roots: vec![],
         }
     }
@@ -594,6 +599,7 @@ read_roots = ["/"]             # where read_file may read (files that look like 
 write_roots = []               # extra dirs write_file may write
 web = true                     # web_search + web_fetch: find pages and read them as text
 # skills_hub = "off"             # the skills index for `pagurus skills search` (default: the public Hermes index)
+# browser = "auto"               # uge: headless Chromium/Chrome/Brave for pages that need it; a path, or "off"
 
 [search]                         # web_search engine
 provider = "auto"                # auto: Brave or Tavily if their key is in the env file, else SearXNG if set, else DuckDuckGo (no account)

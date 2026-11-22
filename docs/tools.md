@@ -41,6 +41,23 @@
   is on. git runs with the repository's hooks, fsmonitor, pagers, external diff tools and credential helpers switched
   off, so a hostile repository can't run code through it.
 
+## Browser (uge build)
+
+For pages `web_fetch` can't read (they need JavaScript), and for clicking, filling in forms, screenshots and PDFs,
+the uge build drives a real browser: headless Chromium, Google Chrome, Brave or Edge, whichever it finds first
+(`[tools] browser = "auto"`, a path to pick one, or `"off"`).
+
+- **open** a page and get its text plus a numbered list of links, buttons and fields; **click** or **type** by number
+  or by visible text; **scroll**, **back**, **read** again.
+- **screenshot**: the model sees it (if it can see images) and it's saved under `workspace/browser/`, so pagurus can
+  send it to you. **pdf** saves the page as a PDF the same way.
+- **Light on RAM:** the browser starts on first use and closes after 3 minutes without use (and when pagurus exits).
+  On a Pi it costs roughly 150–250 MB only while it's open.
+- **Safe by default:** a fresh, empty profile every time, so no access to your own browser's cookies or logins;
+  only http(s) pages; cloud metadata addresses can't be reached; downloads are off. Page text counts as outside text
+  (checked for prompt injection). **Typing asks you first** (site and text shown) unless yolo is on, and pagurus refuses
+  to type its own keys or tokens.
+
 ## Approvals, the safety floor and yolo
 
 Every command pagurus wants to run is decided in one of these ways, and each decision is written to

@@ -299,6 +299,21 @@ pub fn definitions(cfg: &Config, set: Set) -> Value {
         "Load the full instructions of a skill listed in the system prompt before following it.",
         json!({"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}),
     ));
+    #[cfg(feature = "browser")]
+    if set == Set::Full && cfg.tools.web && cfg.tools.browser.trim() != "off" {
+        v.push(def(
+            "browser",
+            "A real headless browser, for pages web_fetch can't read (JavaScript), clicking, forms, screenshots, PDFs. \
+             open url → text + numbered elements; click/type target = number or visible text; type asks the user. \
+             Fresh profile: no user logins.",
+            json!({"type":"object","properties":{
+                "action":{"type":"string","enum":["open","read","click","type","scroll","back","screenshot","pdf","close"]},
+                "url":{"type":"string"},"target":{"type":"string"},"text":{"type":"string"},
+                "enter":{"type":"boolean","description":"type: press Enter after"},
+                "direction":{"type":"string","enum":["down","up"]}},
+              "required":["action"]}),
+        ));
+    }
     #[cfg(feature = "hub")]
     if set == Set::Full && !matches!(cfg.tools.skills_hub.trim(), "" | "off") {
         v.push(def(
@@ -327,7 +342,7 @@ pub fn parallel_safe(ctx: &Ctx, name: &str, raw: &str) -> bool {
         "read_file" | "list_dir" | "session_search" | "skill_view" => true,
         #[cfg(feature = "code")]
         "grep" | "glob" => true,
-        "web_fetch" | "web_search" | "art" => ctx.cfg.tools.web,
+        "web_fetch" | "web_search" | "art" | "browser" => ctx.cfg.tools.web,
         "shell" => {
             ctx.cfg.tools.shell != "off"
                 && a.get("host").is_none()
@@ -344,7 +359,7 @@ pub fn execute(ctx: &Ctx, set: Set, name: &str, raw: &str) -> String {
     if set == Set::Review && !matches!(name, "memory" | "skill_propose" | "skill_view") {
         return format!("error: {name} is not available during review");
     }
-    if set == Set::Sub && matches!(name, "delegate" | "todo" | "heartbeat" | "memory" | "skill_propose" | "skill_hub" | "send_file" | "clarify" | "process" | "board" | "ask_peer") {
+    if set == Set::Sub && matches!(name, "delegate" | "todo" | "heartbeat" | "memory" | "skill_propose" | "skill_hub" | "browser" | "send_file" | "clarify" | "process" | "board" | "ask_peer") {
         return format!("error: {name} is not available to a sub-agent; report back instead");
     }
     let raw = if raw.trim().is_empty() { "{}" } else { raw };
@@ -418,6 +433,7 @@ fn outside_text(ctx: &Ctx, name: &str, a: &Value) -> Option<String> {
     let arg = |k: &str| a[k].as_str().unwrap_or("").to_string();
     match name {
         "web_fetch" => Some(format!("web page {}", arg("url"))),
+        "browser" if matches!(arg("action").as_str(), "open" | "read" | "click" | "type" | "scroll" | "back") => Some("web page in the browser".to_string()),
         "web_search" => Some(format!("web search \"{}\"", arg("query"))),
         "art" => Some("art data from objkt".to_string()),
         "view_image" => Some(format!("image {}", arg("path"))),
@@ -638,6 +654,11 @@ fn dispatch(ctx: &Ctx, name: &str, a: &Value) -> Result<String, String> {
         "skill_propose" => {
             let change = Change::SkillWrite { name: s(a, "name")?, description: s(a, "description")?, body: s(a, "body")? };
             learn::submit(ctx.home, ctx.cfg, change, &opt(a, "reason").unwrap_or_default(), ctx.session)
+        }
+        #[cfg(feature = "browser")]
+        "browser" if ctx.cfg.tools.web => {
+            let ask = |what: &str| approve(ctx, "typing into a web page sends that text to the site", what);
+            crate::browser::run(ctx.home, &ctx.cfg.tools.browser, a, &ask)
         }
         #[cfg(feature = "hub")]
         "skill_hub" => match a["action"].as_str().unwrap_or("") {
@@ -917,7 +938,7 @@ fn blocked_ip(ip: std::net::IpAddr) -> bool {
 
 /// Resolves like the system does, minus blocked addresses; checked on every
 /// connection, so redirects and DNS names pointing at 169.254.169.254 are caught too.
-fn guarded_resolve(netloc: &str) -> std::io::Result<Vec<std::net::SocketAddr>> {
+pub(crate) fn guarded_resolve(netloc: &str) -> std::io::Result<Vec<std::net::SocketAddr>> {
     use std::net::ToSocketAddrs;
     let all: Vec<_> = netloc.to_socket_addrs()?.collect();
     let ok: Vec<_> = all.iter().copied().filter(|a| !blocked_ip(a.ip())).collect();
@@ -2087,7 +2108,7 @@ mod tests {
 mod defsize {
     /// Every tool description is sent with every model call: keep the total in check
     /// (it was 10.6k chars with every built-in tool on; raise this only on purpose:
-    /// 12k since the task board and parallel delegation; uge: +400 for the skills hub).
+    /// 12k since the task board and parallel delegation; uge: +400 for the skills hub, +700 for the browser).
     #[test]
     fn tool_definitions_stay_small() {
         let mut cfg = crate::config::Config::default();
@@ -2095,7 +2116,7 @@ mod defsize {
         cfg.tools.shell = "ask".into();
         let total: usize = super::definitions(&cfg, super::Set::Full).as_array().unwrap().iter().map(|d| d.to_string().len()).sum();
         // the uge build adds its own tools (art for Tezos and Ethereum with discovery: ~1.3k) on top of the small build's budget
-        let budget = if cfg!(feature = "art") { 14_600 } else { 12_000 };
+        let budget = if cfg!(feature = "art") { 15_300 } else { 12_000 };
         assert!(total <= budget, "tool definitions grew to {total} chars");
     }
 }

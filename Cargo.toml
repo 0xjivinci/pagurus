@@ -40,8 +40,10 @@ tui = ["dep:libc"]
 code = []
 # Search and install from the skills hub (the public Hermes index).
 hub = []
+# Browser automation through a headless Chromium (uge).
+browser = []
 # "uge": the big build for laptops and servers: every optional feature.
-uge = ["sqlite", "art", "tui", "code", "hub"]
+uge = ["sqlite", "art", "tui", "code", "hub", "browser"]
 # The older name for the big build.
 full = ["uge"]
 

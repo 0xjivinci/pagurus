@@ -11,6 +11,8 @@ mod art_taste;
 mod art_dash;
 mod ask;
 mod autonomy;
+#[cfg(feature = "browser")]
+mod browser;
 mod board;
 mod bundled;
 mod channel;
@@ -83,6 +85,8 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let r = run(&args);
     mcp::shutdown();
+    #[cfg(feature = "browser")]
+    browser::close();
     if let Err(e) = r {
         eprintln!("pagurus: {e}");
         std::process::exit(1);
