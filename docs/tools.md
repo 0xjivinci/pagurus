@@ -44,19 +44,30 @@
 ## Browser (uge build)
 
 For pages `web_fetch` can't read (they need JavaScript), and for clicking, filling in forms, screenshots and PDFs,
-the uge build drives a real browser: headless Chromium, Google Chrome, Brave or Edge, whichever it finds first
-(`[tools] browser = "auto"`, a path to pick one, or `"off"`).
+the uge build drives a real headless browser.
 
+- **Engines:** [Lightpanda](https://github.com/lightpanda-io/browser) when it's installed: a small browser that runs
+  pages without drawing them, at a fraction of Chromium's memory and CPU. Otherwise Chromium, Google Chrome, Brave
+  or Edge. Lightpanda can't draw, so a **screenshot** or **pdf** briefly starts Chromium for that capture only.
+  `[tools] browser = "auto"` (default), `"lightpanda"`, `"chromium"`, a path, or `"off"`. pagurus always starts
+  Lightpanda with its usage telemetry switched off.
 - **open** a page and get its text plus a numbered list of links, buttons and fields; **click** or **type** by number
-  or by visible text; **scroll**, **back**, **read** again.
-- **screenshot**: the model sees it (if it can see images) and it's saved under `workspace/browser/`, so pagurus can
-  send it to you. **pdf** saves the page as a PDF the same way.
-- **Light on RAM:** the browser starts on first use and closes after 3 minutes without use (and when pagurus exits).
-  On a Pi it costs roughly 150–250 MB only while it's open.
+  or by visible text; **scroll**, **back**, **read** again. Screenshots are shown to the model (if it can see images)
+  and saved under `workspace/browser/`, like PDFs, so pagurus can send them to you.
+- **Easy on a busy machine:** browsers run at the lowest CPU priority (`nice 19`), start on first use and close after
+  3 minutes without use (and when pagurus exits), so a Pi running services and a kiosk keeps them first.
 - **Safe by default:** a fresh, empty profile every time, so no access to your own browser's cookies or logins;
   only http(s) pages; cloud metadata addresses can't be reached; downloads are off. Page text counts as outside text
   (checked for prompt injection). **Typing asks you first** (site and text shown) unless yolo is on, and pagurus refuses
   to type its own keys or tokens.
+
+Installing Lightpanda on a Raspberry Pi (64-bit OS) or Linux arm64:
+
+```sh
+mkdir -p ~/.local/bin
+curl -fL -o ~/.local/bin/lightpanda https://github.com/lightpanda-io/browser/releases/latest/download/lightpanda-aarch64-linux
+chmod +x ~/.local/bin/lightpanda
+```
 
 ## Approvals, the safety floor and yolo
 

@@ -1,9 +1,14 @@
-//! Browser automation (uge): drive a headless Chromium (or Chrome / Brave /
-//! Edge) over the DevTools protocol, for pages that need JavaScript, clicking,
-//! typing, screenshots and PDFs. `web_fetch` stays the cheap way to read a page.
+//! Browser automation (uge): drive a headless browser over the DevTools
+//! protocol (CDP), for pages that need JavaScript, clicking, typing,
+//! screenshots and PDFs. `web_fetch` stays the cheap way to read a page.
 //!
-//! RAM: the browser starts on first use and is closed after IDLE_SECS without
-//! use, so a Pi only pays for it during a task.
+//! Engines: Lightpanda when it's installed (a small browser that runs pages
+//! without drawing them: a fraction of Chromium's RAM and CPU), else Chromium /
+//! Chrome / Brave / Edge. Lightpanda can't draw, so a screenshot or PDF starts
+//! Chromium just for that capture and closes it again.
+//!
+//! Easy on a busy machine (a Pi running services and a kiosk): browsers run at
+//! the lowest CPU priority, start on first use and close after IDLE_SECS idle.
 //!
 //! Safety:
 //! - a fresh, empty profile each time: no cookies, logins or history of the user's own browser
@@ -22,11 +27,23 @@ use std::time::{Duration, Instant};
 /// Close the browser after this long without use.
 const IDLE_SECS: u64 = 180;
 /// One command may take this long (a slow page load on a Pi).
-const CALL_SECS: u64 = 45;
+const CALL_SECS: u64 = 60;
 /// Page text returned to the model.
 const TEXT_CHARS: usize = 8000;
 
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Engine {
+    Chromium,
+    Lightpanda,
+}
+
+fn engine_of(exe: &Path) -> Engine {
+    let name = exe.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+    if name.contains("lightpanda") { Engine::Lightpanda } else { Engine::Chromium }
+}
+
 struct Browser {
+    engine: Engine,
     child: Child,
     profile: PathBuf,
     ws: Ws<TcpStream>,
@@ -37,13 +54,29 @@ struct Browser {
 
 static B: Mutex<Option<Browser>> = Mutex::new(None);
 
-/// A Chromium-family browser: `tools.browser` when it's a path, else the first one found.
-pub fn find(setting: &str) -> Option<PathBuf> {
-    let s = setting.trim();
-    if !matches!(s, "" | "auto" | "off") {
-        let p = crate::util::expand(s);
-        return p.is_file().then_some(p);
+/// The browser to use: `tools.browser` = a path, "lightpanda", "chromium", or
+/// "auto" (Lightpanda if installed, else a Chromium-family browser).
+pub fn find(home: &Path, setting: &str) -> Option<PathBuf> {
+    match setting.trim() {
+        "" | "auto" => find_lightpanda(home).or_else(find_chromium),
+        "lightpanda" => find_lightpanda(home),
+        "chromium" | "chrome" => find_chromium(),
+        "off" => None,
+        p => Some(crate::util::expand(p)).filter(|p| p.is_file()),
     }
+}
+
+fn on_path(name: &str) -> Option<PathBuf> {
+    std::env::split_paths(&std::env::var_os("PATH")?).map(|d| d.join(name)).find(|p| p.is_file())
+}
+
+fn find_lightpanda(home: &Path) -> Option<PathBuf> {
+    let user = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+    on_path("lightpanda").or_else(|| [user.join(".local/bin/lightpanda"), home.join("bin/lightpanda")].into_iter().find(|p| p.is_file()))
+}
+
+/// A browser that can draw (screenshots, PDFs).
+fn find_chromium() -> Option<PathBuf> {
     #[cfg(target_os = "macos")]
     for app in [
         "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
@@ -55,27 +88,82 @@ pub fn find(setting: &str) -> Option<PathBuf> {
             return Some(app.into());
         }
     }
-    let path = std::env::var_os("PATH")?;
-    for name in ["chromium", "chromium-browser", "google-chrome", "google-chrome-stable", "brave-browser", "microsoft-edge"] {
-        for dir in std::env::split_paths(&path) {
-            let p = dir.join(name);
-            if p.is_file() {
-                return Some(p);
-            }
-        }
-    }
-    None
+    ["chromium", "chromium-browser", "google-chrome", "google-chrome-stable", "brave-browser", "microsoft-edge"].into_iter().find_map(on_path)
 }
 
-fn launch(home: &Path, setting: &str) -> Result<Browser, String> {
-    let exe = find(setting).ok_or(
-        "no Chromium-family browser found (chromium, google-chrome, brave); install one or set tools.browser to its path",
-    )?;
+/// The command for `exe` at the lowest CPU priority, with a minimal environment.
+fn low_priority(exe: &Path) -> Command {
+    let nice = ["/usr/bin/nice", "/bin/nice"].into_iter().find(|p| Path::new(p).is_file());
+    let mut cmd = match nice {
+        Some(n) => {
+            let mut c = Command::new(n);
+            c.args(["-n", "19"]).arg(exe);
+            c
+        }
+        None => Command::new(exe),
+    };
+    cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    crate::tools::clean_env(&mut cmd);
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    cmd
+}
+
+/// Start `exe` and attach to a fresh tab. `tag` keeps a second (picture) browser's files apart.
+fn launch(home: &Path, exe: &Path, tag: &str) -> Result<Browser, String> {
     clean_stale(home);
-    let profile = home.join("cache").join(format!("browser-{}", std::process::id()));
+    let profile = home.join("cache").join(format!("browser-{}{tag}", std::process::id()));
     let _ = std::fs::remove_dir_all(&profile);
     std::fs::create_dir_all(&profile).map_err(|e| e.to_string())?;
-    let mut cmd = Command::new(&exe);
+    let engine = engine_of(exe);
+    let (mut child, port, path) = match engine {
+        Engine::Lightpanda => start_lightpanda(exe, &profile)?,
+        Engine::Chromium => start_chromium(exe, &profile)?,
+    };
+    // a slow machine (a Pi) can take seconds to answer the handshake: short reads only after it
+    let ws = TcpStream::connect(("127.0.0.1", port)).map_err(|e| format!("browser: {e}")).and_then(|sock| {
+        let _ = sock.set_read_timeout(Some(Duration::from_secs(15)));
+        let handle = sock.try_clone().map_err(|e| format!("browser: {e}"))?;
+        let ws = Ws::handshake(sock, &format!("127.0.0.1:{port}"), &path)?;
+        let _ = handle.set_read_timeout(Some(Duration::from_millis(500)));
+        Ok(ws)
+    });
+    let ws = match ws {
+        Ok(ws) => ws,
+        Err(e) => {
+            kill(&mut child, &profile);
+            return Err(e);
+        }
+    };
+    let mut b = Browser { engine, child, profile, ws, session: String::new(), next: 0, used: Instant::now() };
+    b.attach()?; // on failure, dropping `b` stops the browser
+    Ok(b)
+}
+
+/// Lightpanda serves CDP on a port we pick; no usage data is sent.
+fn start_lightpanda(exe: &Path, profile: &Path) -> Result<(Child, u16, String), String> {
+    let port = std::net::TcpListener::bind("127.0.0.1:0").and_then(|l| l.local_addr()).map_err(|e| e.to_string())?.port();
+    let mut cmd = low_priority(exe);
+    cmd.args(["serve", "--host", "127.0.0.1", "--port", &port.to_string(), "--log-level", "err"]).env("LIGHTPANDA_DISABLE_TELEMETRY", "true");
+    let mut child = cmd.spawn().map_err(|e| format!("could not start {}: {e}", exe.display()))?;
+    let _ = std::fs::write(profile.join("pagurus-browser.pid"), child.id().to_string());
+    let t0 = Instant::now();
+    while TcpStream::connect(("127.0.0.1", port)).is_err() {
+        if t0.elapsed() > Duration::from_secs(20) || child.try_wait().ok().flatten().is_some() {
+            kill(&mut child, profile);
+            return Err(format!("{} didn't start its CDP server", exe.display()));
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    Ok((child, port, "/".into()))
+}
+
+/// Chromium picks its own port and writes it to DevToolsActivePort.
+fn start_chromium(exe: &Path, profile: &Path) -> Result<(Child, u16, String), String> {
+    let mut cmd = low_priority(exe);
     cmd.args([
         "--headless=new",
         "--remote-debugging-port=0",
@@ -96,55 +184,30 @@ fn launch(home: &Path, setting: &str) -> Result<Browser, String> {
         "--host-resolver-rules=MAP 169.254.169.254 ~NOTFOUND, MAP metadata.google.internal ~NOTFOUND, MAP 100.100.100.200 ~NOTFOUND",
     ])
     .arg(format!("--user-data-dir={}", profile.display()))
-    .arg("about:blank")
-    .stdin(Stdio::null())
-    .stdout(Stdio::null())
-    .stderr(Stdio::null());
-    crate::tools::clean_env(&mut cmd);
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        cmd.process_group(0);
-    }
+    .arg("about:blank");
     let mut child = cmd.spawn().map_err(|e| format!("could not start {}: {e}", exe.display()))?;
     let _ = std::fs::write(profile.join("pagurus-browser.pid"), child.id().to_string());
-    // Chromium writes its port and browser path once it listens
     let port_file = profile.join("DevToolsActivePort");
     let t0 = Instant::now();
-    let (port, path) = loop {
+    loop {
         let s = crate::util::read(&port_file);
         let mut l = s.lines();
         if let (Some(p), Some(path)) = (l.next().and_then(|p| p.trim().parse::<u16>().ok()), l.next()) {
-            break (p, path.trim().to_string());
+            return Ok((child, p, path.trim().to_string()));
         }
-        if t0.elapsed() > Duration::from_secs(30) || child.try_wait().ok().flatten().is_some() {
-            kill(&mut child, &profile);
+        if t0.elapsed() > Duration::from_secs(45) || child.try_wait().ok().flatten().is_some() {
+            kill(&mut child, profile);
             return Err(format!("{} didn't start a debugging port", exe.display()));
         }
         std::thread::sleep(Duration::from_millis(100));
-    };
-    // a slow machine (a Pi) can take seconds to answer the handshake: short reads only after it
-    let ws = TcpStream::connect(("127.0.0.1", port)).map_err(|e| format!("browser: {e}")).and_then(|sock| {
-        let _ = sock.set_read_timeout(Some(Duration::from_secs(15)));
-        let handle = sock.try_clone().map_err(|e| format!("browser: {e}"))?;
-        let ws = Ws::handshake(sock, &format!("127.0.0.1:{port}"), &path)?;
-        let _ = handle.set_read_timeout(Some(Duration::from_millis(500)));
-        Ok(ws)
-    });
-    let ws = match ws {
-        Ok(ws) => ws,
-        Err(e) => {
-            kill(&mut child, &profile);
-            return Err(e);
-        }
-    };
-    let mut b = Browser { child, profile, ws, session: String::new(), next: 0, used: Instant::now() };
-    match b.attach() {
-        Ok(()) => Ok(b),
-        Err(e) => {
-            kill(&mut b.child, &b.profile);
-            Err(e)
-        }
+    }
+}
+
+impl Drop for Browser {
+    fn drop(&mut self) {
+        let _ = self.call_browser_quick("Browser.close");
+        self.ws.close();
+        kill(&mut self.child, &self.profile);
     }
 }
 
@@ -161,7 +224,7 @@ fn clean_stale(home: &Path) {
     let Ok(rd) = std::fs::read_dir(home.join("cache")) else { return };
     for e in rd.flatten() {
         let name = e.file_name().to_string_lossy().into_owned();
-        let Some(owner) = name.strip_prefix("browser-").and_then(|p| p.parse::<u32>().ok()) else { continue };
+        let Some(owner) = name.strip_prefix("browser-").and_then(|p| p.split('-').next()?.parse::<u32>().ok()) else { continue };
         if owner == std::process::id() || alive(owner) {
             continue;
         }
@@ -228,6 +291,12 @@ impl Browser {
         }
     }
 
+    /// Fire and forget (closing): don't wait for an answer.
+    fn call_browser_quick(&mut self, method: &str) -> std::io::Result<()> {
+        self.next += 1;
+        self.ws.send_text(&json!({ "id": self.next, "method": method, "params": {} }).to_string())
+    }
+
     fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
         self.send(method, params, true)
     }
@@ -279,19 +348,23 @@ impl Browser {
 /// Lists visible links, buttons and fields, numbers them (data-pagurus) and returns the page as JSON text.
 const PAGE_JS: &str = r#"(() => {
   const sel = 'a[href],button,input:not([type=hidden]),textarea,select,[role=button],[role=link],[role=tab],[role=checkbox],[contenteditable=true],summary';
-  const vis = e => { const r = e.getBoundingClientRect(), s = getComputedStyle(e); return r.width > 0 && r.height > 0 && s.visibility != 'hidden' && s.display != 'none'; };
+  const vis = e => { try { const r = e.getBoundingClientRect(), s = getComputedStyle(e); return r.width > 0 && r.height > 0 && s.visibility != 'hidden' && s.display != 'none'; } catch (_) { return true; } };
   document.querySelectorAll('[data-pagurus]').forEach(e => e.removeAttribute('data-pagurus'));
-  const els = [...document.querySelectorAll(sel)].filter(vis).slice(0, 80);
+  const all = [...document.querySelectorAll(sel)];
+  let shown = all.filter(vis);
+  // a browser without layout (Lightpanda) reports every box as empty: keep what isn't hidden
+  if (!shown.length) shown = all.filter(e => !e.hidden && e.getAttribute('aria-hidden') != 'true');
+  const els = shown.slice(0, 80);
   const out = els.map((e, i) => {
     e.setAttribute('data-pagurus', i + 1);
     const tag = e.tagName.toLowerCase();
     const kind = tag == 'input' ? '[' + (e.type || 'text') + ']' : '';
-    const label = (e.innerText || e.getAttribute('aria-label') || e.placeholder || e.title || e.name || e.alt || '').trim().replace(/\s+/g, ' ').slice(0, 70);
+    const label = (e.innerText || e.textContent || e.getAttribute('aria-label') || e.placeholder || e.title || e.name || e.alt || '').trim().replace(/\s+/g, ' ').slice(0, 70);
     const val = (tag == 'input' || tag == 'textarea') && e.type != 'password' && e.value ? ' = "' + e.value.slice(0, 40) + '"' : '';
     const href = tag == 'a' ? ' -> ' + (e.getAttribute('href') || '').slice(0, 80) : '';
     return '[' + (i + 1) + '] ' + tag + kind + (label ? ' "' + label + '"' : '') + val + href;
   });
-  const text = (document.body ? document.body.innerText : '').replace(/\n\s*\n\s*\n+/g, '\n\n').slice(0, LIMIT);
+  const text = (document.body ? (document.body.innerText || document.body.textContent || '') : '').replace(/\n\s*\n\s*\n+/g, '\n\n').slice(0, LIMIT);
   return JSON.stringify({ title: document.title, url: location.href, text, els: out });
 })()"#;
 
@@ -305,11 +378,11 @@ fn element_js(target: &str, then: &str) -> String {
   if (!e) {{
     const all = [...document.querySelectorAll('[data-pagurus]')];
     const low = t.toLowerCase();
-    e = all.find(x => (x.innerText || x.getAttribute('aria-label') || x.placeholder || x.value || '').trim().toLowerCase() == low)
-      || all.find(x => (x.innerText || x.getAttribute('aria-label') || x.placeholder || '').toLowerCase().includes(low));
+    const txt = x => (x.innerText || x.textContent || x.getAttribute('aria-label') || x.placeholder || x.value || '').trim().toLowerCase();
+    e = all.find(x => txt(x) == low) || all.find(x => txt(x).includes(low));
   }}
   if (!e) return 'not found';
-  e.scrollIntoView({{ block: 'center' }});
+  if (e.scrollIntoView) e.scrollIntoView({{ block: 'center' }});
   {then}
 }})()"#
     )
@@ -342,15 +415,16 @@ pub fn run(home: &Path, setting: &str, a: &Value, approve: &dyn Fn(&str) -> Resu
     }
     let mut guard = B.lock().map_err(|_| "browser busy")?;
     if guard.as_mut().is_some_and(|b| b.child.try_wait().ok().flatten().is_some()) {
-        if let Some(mut old) = guard.take() {
-            kill(&mut old.child, &old.profile);
-        }
+        *guard = None; // it died: dropping cleans up
     }
     if guard.is_none() {
         if action != "open" {
             return Err("no page open: use action=open with a url first".into());
         }
-        *guard = Some(launch(home, setting)?);
+        let exe = find(home, setting).ok_or(
+            "no browser found: install Lightpanda (light) or Chromium, or set tools.browser to a browser's path",
+        )?;
+        *guard = Some(launch(home, &exe, "")?);
         reaper();
     }
     let b = guard.as_mut().ok_or("browser not running")?;
@@ -387,10 +461,22 @@ pub fn run(home: &Path, setting: &str, a: &Value, approve: &dyn Fn(&str) -> Resu
             if r.as_str() == Some("not found") {
                 return Err(format!("no element `{target}` on this page; use action=read to see the numbered list"));
             }
-            b.call("Input.insertText", json!({ "text": text }))?;
+            // real key input where the browser has it; setting the value (with the events
+            // a page listens for) where it doesn't
+            if b.call("Input.insertText", json!({ "text": text })).is_err() {
+                let js = format!(
+                    "(() => {{ const e = document.activeElement; if (!e) return 'no field'; e.value = {}; \
+                     e.dispatchEvent(new Event('input', {{ bubbles: true }})); e.dispatchEvent(new Event('change', {{ bubbles: true }})); return 'ok'; }})()",
+                    serde_json::to_string(&text).unwrap_or_default()
+                );
+                b.eval(&js)?;
+            }
             if a["enter"].as_bool() == Some(true) {
-                for kind in ["keyDown", "keyUp"] {
-                    b.call("Input.dispatchKeyEvent", json!({ "type": kind, "key": "Enter", "code": "Enter", "windowsVirtualKeyCode": 13, "text": "\r" }))?;
+                let keys = ["keyDown", "keyUp"].iter().try_for_each(|kind| {
+                    b.call("Input.dispatchKeyEvent", json!({ "type": kind, "key": "Enter", "code": "Enter", "windowsVirtualKeyCode": 13, "text": "\r" })).map(|_| ())
+                });
+                if keys.is_err() {
+                    b.eval("(() => { const f = document.activeElement && document.activeElement.form; if (f) { f.requestSubmit ? f.requestSubmit() : f.submit(); } return 'ok'; })()")?;
                 }
                 b.settle(10);
             }
@@ -407,36 +493,48 @@ pub fn run(home: &Path, setting: &str, a: &Value, approve: &dyn Fn(&str) -> Resu
             b.settle(10);
             b.page(TEXT_CHARS)
         }
-        "screenshot" => {
-            let r = b.call("Page.captureScreenshot", json!({ "format": "jpeg", "quality": 75 }))?;
-            let data = r["data"].as_str().ok_or("browser: no screenshot")?;
-            let bytes = crate::util::unbase64(data).ok_or("browser: bad screenshot data")?;
-            let file = save(home, &b.url(), "jpg", &bytes)?;
-            crate::tools::show_image(format!("screenshot of {}", b.url()), format!("data:image/jpeg;base64,{data}"));
-            Ok(format!(
-                "Screenshot attached below for you to look at, saved as {}. To give it to the user, send_file that path.",
-                file.display()
-            ))
-        }
-        "pdf" => {
-            let r = b.call("Page.printToPDF", json!({ "printBackground": true, "transferMode": "ReturnAsStream" }))?;
-            let stream = r["stream"].as_str().ok_or("browser: no PDF stream")?.to_string();
-            let mut bytes = Vec::new();
-            loop {
-                let c = b.call("IO.read", json!({ "handle": stream, "size": 1 << 20 }))?;
-                let chunk = c["data"].as_str().unwrap_or("");
-                let part = if c["base64Encoded"].as_bool() == Some(true) { crate::util::unbase64(chunk).ok_or("browser: bad PDF data")? } else { chunk.as_bytes().to_vec() };
-                bytes.extend_from_slice(&part);
-                if c["eof"].as_bool() == Some(true) || bytes.len() > 50 << 20 {
-                    break;
-                }
+        "screenshot" | "pdf" => {
+            if b.engine == Engine::Chromium {
+                return picture(home, b, action);
             }
-            let _ = b.call("IO.close", json!({ "handle": stream }));
-            let file = save(home, &b.url(), "pdf", &bytes)?;
-            Ok(format!("Saved the page as a PDF ({} KB): {}. To give it to the user, send_file that path.", bytes.len() / 1024, file.display()))
+            // Lightpanda can't draw: a Chromium opens the same address just for this, then closes
+            let url = b.url();
+            check_url(&url)?;
+            let exe = find_chromium().ok_or("this light browser can't make screenshots or PDFs, and no Chromium is installed for them")?;
+            let mut c = launch(home, &exe, "-picture")?;
+            c.call("Page.navigate", json!({ "url": url }))?;
+            c.settle(20);
+            picture(home, &mut c, action).map(|m| format!("{m}\n(Captured by opening the same address again in Chromium, so anything typed or clicked here isn't in it.)"))
         }
         other => Err(format!("browser action `{other}`: use open, read, click, type, scroll, back, screenshot, pdf or close")),
     }
+}
+
+/// A screenshot (shown to the model) or a PDF of what `b` shows, saved under workspace/browser.
+fn picture(home: &Path, b: &mut Browser, action: &str) -> Result<String, String> {
+    if action == "screenshot" {
+        let r = b.call("Page.captureScreenshot", json!({ "format": "jpeg", "quality": 75 }))?;
+        let data = r["data"].as_str().ok_or("browser: no screenshot")?;
+        let bytes = crate::util::unbase64(data).ok_or("browser: bad screenshot data")?;
+        let file = save(home, &b.url(), "jpg", &bytes)?;
+        crate::tools::show_image(format!("screenshot of {}", b.url()), format!("data:image/jpeg;base64,{data}"));
+        return Ok(format!("Screenshot attached below for you to look at, saved as {}. To give it to the user, send_file that path.", file.display()));
+    }
+    let r = b.call("Page.printToPDF", json!({ "printBackground": true, "transferMode": "ReturnAsStream" }))?;
+    let stream = r["stream"].as_str().ok_or("browser: no PDF stream")?.to_string();
+    let mut bytes = Vec::new();
+    loop {
+        let c = b.call("IO.read", json!({ "handle": stream, "size": 1 << 20 }))?;
+        let chunk = c["data"].as_str().unwrap_or("");
+        let part = if c["base64Encoded"].as_bool() == Some(true) { crate::util::unbase64(chunk).ok_or("browser: bad PDF data")? } else { chunk.as_bytes().to_vec() };
+        bytes.extend_from_slice(&part);
+        if c["eof"].as_bool() == Some(true) || bytes.len() > 50 << 20 {
+            break;
+        }
+    }
+    let _ = b.call("IO.close", json!({ "handle": stream }));
+    let file = save(home, &b.url(), "pdf", &bytes)?;
+    Ok(format!("Saved the page as a PDF ({} KB): {}. To give it to the user, send_file that path.", bytes.len() / 1024, file.display()))
 }
 
 /// A file in workspace/browser named after the page's host.
@@ -453,11 +551,7 @@ fn save(home: &Path, url: &str, ext: &str, bytes: &[u8]) -> Result<PathBuf, Stri
 /// Close the browser now (also when pagurus exits normally).
 pub fn close() {
     if let Ok(mut g) = B.lock() {
-        if let Some(mut b) = g.take() {
-            let _ = b.call_browser("Browser.close", json!({}));
-            b.ws.close();
-            kill(&mut b.child, &b.profile);
-        }
+        *g = None; // Drop stops it and removes its files
     }
 }
 
@@ -520,7 +614,8 @@ mod tests {
             }
         });
         let yes = |_: &str| Ok(());
-        let go = |a: Value| run(&home, "auto", &a, &yes);
+        let engine = std::env::var("PAGURUS_TEST_BROWSER").unwrap_or_else(|_| "auto".into());
+        let go = |a: Value| run(&home, &engine, &a, &yes);
         let page = go(json!({"action":"open","url":format!("http://127.0.0.1:{port}/")})).unwrap();
         assert!(page.contains("Crab shop") && page.contains("\"Go next\""), "{page}");
         let typed = go(json!({"action":"type","target":"Search shells","text":"hermit"})).unwrap();
