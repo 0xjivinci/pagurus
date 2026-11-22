@@ -123,17 +123,29 @@ fn launch(home: &Path, setting: &str) -> Result<Browser, String> {
         }
         std::thread::sleep(Duration::from_millis(100));
     };
-    let sock = TcpStream::connect(("127.0.0.1", port)).map_err(|e| format!("browser: {e}"))?;
-    let _ = sock.set_read_timeout(Some(Duration::from_millis(500)));
-    let ws = Ws::handshake(sock, &format!("127.0.0.1:{port}"), &path)?;
+    // a slow machine (a Pi) can take seconds to answer the handshake: short reads only after it
+    let ws = TcpStream::connect(("127.0.0.1", port)).map_err(|e| format!("browser: {e}")).and_then(|sock| {
+        let _ = sock.set_read_timeout(Some(Duration::from_secs(15)));
+        let handle = sock.try_clone().map_err(|e| format!("browser: {e}"))?;
+        let ws = Ws::handshake(sock, &format!("127.0.0.1:{port}"), &path)?;
+        let _ = handle.set_read_timeout(Some(Duration::from_millis(500)));
+        Ok(ws)
+    });
+    let ws = match ws {
+        Ok(ws) => ws,
+        Err(e) => {
+            kill(&mut child, &profile);
+            return Err(e);
+        }
+    };
     let mut b = Browser { child, profile, ws, session: String::new(), next: 0, used: Instant::now() };
-    let _ = b.call_browser("Browser.setDownloadBehavior", json!({ "behavior": "deny" }));
-    let target = b.call_browser("Target.createTarget", json!({ "url": "about:blank" }))?;
-    let id = target["targetId"].as_str().ok_or("browser: no target")?.to_string();
-    let att = b.call_browser("Target.attachToTarget", json!({ "targetId": id, "flatten": true }))?;
-    b.session = att["sessionId"].as_str().ok_or("browser: no session")?.to_string();
-    b.call("Page.enable", json!({}))?;
-    Ok(b)
+    match b.attach() {
+        Ok(()) => Ok(b),
+        Err(e) => {
+            kill(&mut b.child, &b.profile);
+            Err(e)
+        }
+    }
 }
 
 fn kill(child: &mut Child, profile: &Path) {
@@ -172,6 +184,17 @@ fn alive(_: u32) -> bool {
 }
 
 impl Browser {
+    /// A tab to work in, with downloads off.
+    fn attach(&mut self) -> Result<(), String> {
+        let _ = self.call_browser("Browser.setDownloadBehavior", json!({ "behavior": "deny" }));
+        let target = self.call_browser("Target.createTarget", json!({ "url": "about:blank" }))?;
+        let id = target["targetId"].as_str().ok_or("browser: no target")?.to_string();
+        let att = self.call_browser("Target.attachToTarget", json!({ "targetId": id, "flatten": true }))?;
+        self.session = att["sessionId"].as_str().ok_or("browser: no session")?.to_string();
+        self.call("Page.enable", json!({}))?;
+        Ok(())
+    }
+
     fn send(&mut self, method: &str, params: Value, session: bool) -> Result<Value, String> {
         self.next += 1;
         let id = self.next;
