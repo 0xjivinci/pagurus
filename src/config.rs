@@ -424,6 +424,8 @@ pub struct ToolsCfg {
     pub write_roots: Vec<String>,
     /// `web_fetch`: read one URL as text.
     pub web: bool,
+    /// The skills hub index (`pagurus skills search`): an https URL, or "off".
+    pub skills_hub: String,
 }
 
 /// Read-only commands that run without asking (also joined with | and &&).
@@ -468,6 +470,7 @@ impl Default for ToolsCfg {
             shell_timeout_secs: 30,
             read_roots: vec!["/".into()],
             web: true,
+            skills_hub: crate::hub::HERMES_INDEX.into(),
             write_roots: vec![],
         }
     }
@@ -588,6 +591,7 @@ shell_timeout_secs = 30
 read_roots = ["/"]             # where read_file may read (files that look like secrets are always refused)
 write_roots = []               # extra dirs write_file may write
 web = true                     # web_search + web_fetch: find pages and read them as text
+# skills_hub = "off"             # the skills index for `pagurus skills search` (default: the public Hermes index)
 
 [search]                         # web_search engine
 provider = "auto"                # auto: Brave or Tavily if their key is in the env file, else SearXNG if set, else DuckDuckGo (no account)

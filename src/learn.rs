@@ -308,8 +308,8 @@ pub fn compute(home: &Path, cfg: &Config, c: &Change) -> Result<(PathBuf, Option
                 one_line(description, 300),
                 body.trim()
             );
-            if after.chars().count() > 12_000 {
-                return Err("skill is longer than 12000 chars; keep it to the essential steps".into());
+            if after.chars().count() > MAX_SKILL_INSTALLED {
+                return Err(format!("skill is longer than {MAX_SKILL_INSTALLED} chars; keep it to the essential steps"));
             }
             Ok((p, before, after))
         }
@@ -329,8 +329,8 @@ pub fn compute(home: &Path, cfg: &Config, c: &Change) -> Result<(PathBuf, Option
             if !after.starts_with("---\n") || !after.contains("\ndescription:") {
                 return Err("the patch would break the skill's header (name/description); patch the body only".into());
             }
-            if after.chars().count() > 12_000 {
-                return Err("skill would be longer than 12000 chars; keep it to the essential steps".into());
+            if after.chars().count() > MAX_SKILL_INSTALLED {
+                return Err(format!("skill would be longer than {MAX_SKILL_INSTALLED} chars; keep it to the essential steps"));
             }
             Ok((p, Some(before), after))
         }
@@ -452,6 +452,10 @@ fn auto_count_24h(home: &Path) -> usize {
 /// Entry point for the model's `memory` / `skill_propose` tools.
 /// The returned text goes back to the model, so it says plainly whether
 /// anything was actually saved.
+/// Longest skill the agent may write itself, and the longest one the user may install.
+pub const MAX_SKILL_LEARNED: usize = 12_000;
+pub const MAX_SKILL_INSTALLED: usize = 24_000;
+
 pub fn submit(home: &Path, cfg: &Config, change: Change, reason: &str, session: &str) -> Result<String, String> {
     submit_from(home, cfg, change, reason, session, crate::util::origin())
 }
@@ -473,7 +477,15 @@ fn submit_from(
     if locks(home).contains(&key) {
         return Err(format!("{key} is locked by the user; leave it as it is"));
     }
-    compute(home, cfg, &change)?;
+    let (_, before, after) = compute(home, cfg, &change)?;
+    // skills the agent writes stay short; it may fix a longer installed one without growing it
+    let len = after.chars().count();
+    if matches!(change, Change::SkillWrite { .. } | Change::SkillPatch { .. })
+        && len > MAX_SKILL_LEARNED
+        && len > before.as_deref().map_or(0, |b| b.chars().count())
+    {
+        return Err(format!("skill would be longer than {MAX_SKILL_LEARNED} chars; keep it to the essential steps"));
+    }
     if let Some(p) = pending(home).into_iter().find(|p| p.change == change) {
         return Ok(format!("already pending as {} — nothing new to do", p.id));
     }
@@ -822,7 +834,7 @@ impl<'a> Pass<'a> {
                     return format!("error: no skill `{n}`");
                 }
                 self.viewed.push(n);
-                return crate::util::clip(&body, 12_000);
+                return crate::util::clip(&body, MAX_SKILL_INSTALLED);
             }
             "skill_propose" => match unread(&get("name"), &self.viewed) {
                 Some(e) => return e,

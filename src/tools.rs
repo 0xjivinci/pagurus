@@ -299,6 +299,18 @@ pub fn definitions(cfg: &Config, set: Set) -> Value {
         "Load the full instructions of a skill listed in the system prompt before following it.",
         json!({"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}),
     ));
+    if set == Set::Full && !matches!(cfg.tools.skills_hub.trim(), "" | "off") {
+        v.push(def(
+            "skill_hub",
+            "Find skills others wrote (~20k: Hermes, GitHub, skills.sh) when none of yours fits. search: names, \
+             trust, ids; install by id (asks the user).",
+            json!({"type":"object","properties":{
+                "action":{"type":"string","enum":["search","install"]},
+                "query":{"type":"string"},
+                "id":{"type":"string","description":"from search"}},
+              "required":["action"]}),
+        ));
+    }
     if set != Set::Review {
         v.extend(crate::mcp::definitions(cfg));
         #[cfg(feature = "code")]
@@ -331,7 +343,7 @@ pub fn execute(ctx: &Ctx, set: Set, name: &str, raw: &str) -> String {
     if set == Set::Review && !matches!(name, "memory" | "skill_propose" | "skill_view") {
         return format!("error: {name} is not available during review");
     }
-    if set == Set::Sub && matches!(name, "delegate" | "todo" | "heartbeat" | "memory" | "skill_propose" | "send_file" | "clarify" | "process" | "board" | "ask_peer") {
+    if set == Set::Sub && matches!(name, "delegate" | "todo" | "heartbeat" | "memory" | "skill_propose" | "skill_hub" | "send_file" | "clarify" | "process" | "board" | "ask_peer") {
         return format!("error: {name} is not available to a sub-agent; report back instead");
     }
     let raw = if raw.trim().is_empty() { "{}" } else { raw };
@@ -626,6 +638,15 @@ fn dispatch(ctx: &Ctx, name: &str, a: &Value) -> Result<String, String> {
             let change = Change::SkillWrite { name: s(a, "name")?, description: s(a, "description")?, body: s(a, "body")? };
             learn::submit(ctx.home, ctx.cfg, change, &opt(a, "reason").unwrap_or_default(), ctx.session)
         }
+        "skill_hub" => match a["action"].as_str().unwrap_or("") {
+            "search" => crate::hub::search_text(ctx.home, ctx.cfg, &s(a, "query")?, 8),
+            "install" => {
+                let p = crate::hub::prepare(ctx.home, ctx.cfg, &s(a, "id")?, false)?;
+                approve(ctx, "installing a skill changes pagurus's own instructions", &p.summary())?;
+                crate::hub::commit(ctx.home, ctx.cfg, p)
+            }
+            other => Err(format!("skill_hub action `{other}`: use search or install")),
+        },
         "skill_view" => {
             let n = s(a, "name")?;
             learn::valid_name(&n)?;
@@ -635,7 +656,7 @@ fn dispatch(ctx: &Ctx, name: &str, a: &Value) -> Result<String, String> {
                 return Err(format!("no skill `{n}`; available: {}", names.join(", ")));
             }
             crate::skills::record_use(ctx.home, &n);
-            Ok(clip(&body, 12_000))
+            Ok(clip(&body, crate::learn::MAX_SKILL_INSTALLED))
         }
         _ => Err(format!("unknown tool `{name}`")),
     }
@@ -2064,7 +2085,7 @@ mod tests {
 mod defsize {
     /// Every tool description is sent with every model call: keep the total in check
     /// (it was 10.6k chars with every built-in tool on; raise this only on purpose:
-    /// 12k since the task board and parallel delegation).
+    /// 12k since the task board and parallel delegation; +400 for the skills hub).
     #[test]
     fn tool_definitions_stay_small() {
         let mut cfg = crate::config::Config::default();
@@ -2072,7 +2093,7 @@ mod defsize {
         cfg.tools.shell = "ask".into();
         let total: usize = super::definitions(&cfg, super::Set::Full).as_array().unwrap().iter().map(|d| d.to_string().len()).sum();
         // the uge build adds its own tools (art for Tezos and Ethereum with discovery: ~1.3k) on top of the small build's budget
-        let budget = if cfg!(feature = "art") { 14_200 } else { 12_000 };
+        let budget = if cfg!(feature = "art") { 14_600 } else { 12_400 };
         assert!(total <= budget, "tool definitions grew to {total} chars");
     }
 }

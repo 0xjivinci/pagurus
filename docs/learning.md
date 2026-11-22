@@ -64,3 +64,27 @@ with where it came from, undoable):
 pagurus skills install https://github.com/<owner>/<repo>/tree/main/skills/<name>
 pagurus skills install ./my-skill --yes
 ```
+
+### Skills hub
+
+pagurus can search the public Hermes skills index: about 100,000 skills from Hermes' own library, GitHub repositories
+(OpenAI, Anthropic, NVIDIA, Hugging Face, …), skills.sh and more. The ~20,000 that live on GitHub can be installed. The
+index is kept as a small local copy (about 3 MB, refreshed weekly) and read piece by piece, so it works on a Pi.
+
+```sh
+pagurus skills search pdf forms          # name, trust level (builtin · trusted · community ⚠) and id
+pagurus skills install <name or id>      # same checks as above; community skills are flagged as unreviewed
+pagurus skills update                    # refresh the index now
+```
+
+In a chat, pagurus does this itself with the `skill_hub` tool when none of its skills fits (the bundled `find-a-skill`
+skill says how), but installing always asks you first. Set `skills_hub = "off"` under `[tools]` to switch it off, or
+point it at another index in the same format. Skills you install may be up to 24,000 characters; skills pagurus writes
+itself stay under 12,000.
+
+### Bundled skills
+
+Every build: `pi-health`, `service-check`, `disk-cleanup`, `log-triage`, `network-check`, `setup-alert`, `screenshot`,
+`write-a-skill`, `research-report`, `plan-a-project`, `summarize`, `find-a-skill`. The uge build adds `coding`,
+`debugging`, `git-workflow`, `make-a-document` and the art skills. Skills that come with a new version are installed once
+when pagurus starts; a bundled skill you delete stays deleted.

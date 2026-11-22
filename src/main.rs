@@ -91,6 +91,13 @@ fn run(args: &[String]) -> Result<(), String> {
     let home = util::home_dir();
     util::load_env(&home);
     let cmd = args.first().map(String::as_str).unwrap_or("chat");
+    // skills that came with this version: installed once, on a home that already exists
+    if matches!(cmd, "chat" | "daemon" | "run" | "code") && home.join("config.toml").exists() {
+        let new = bundled::install_new(&home);
+        if !new.is_empty() && cmd != "daemon" {
+            eprintln!("pagurus: new bundled skills installed: {}", new.join(", "));
+        }
+    }
     match cmd {
         "init" => init(&home),
         "setup" => setup::run(&home),
@@ -161,6 +168,19 @@ fn run(args: &[String]) -> Result<(), String> {
         }
         "skills" if args.get(1).is_some_and(|a| a == "curate") => {
             println!("{}", agent::curate(&home, &config::load(&home)?)?);
+            Ok(())
+        }
+        "skills" if args.get(1).is_some_and(|a| a == "search") => {
+            let q = args[2..].join(" ");
+            if q.trim().is_empty() {
+                return Err("usage: pagurus skills search <words>".into());
+            }
+            print!("{}", hub::search_text(&home, &config::load(&home)?, &q, 12)?);
+            Ok(())
+        }
+        "skills" if args.get(1).is_some_and(|a| a == "update") => {
+            let n = hub::refresh(&home, &config::load(&home)?)?;
+            println!("skills hub index updated: {n} installable skills");
             Ok(())
         }
         "skills" if matches!(args.get(1).map(String::as_str), Some("archive" | "restore")) => {
