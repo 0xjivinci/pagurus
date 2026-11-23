@@ -53,6 +53,7 @@ Next time it knows your backup schedule, and that you like short answers.
 ```sh
 # 1. Install (Linux x86_64 / arm64 / armv7 / armv6, macOS Apple Silicon). Checks the SHA-256 before installing.
 curl -fsSL https://raw.githubusercontent.com/0xjivinci/pagurus/main/install.sh | sh
+#    or the bigger uge build (x86_64, arm64, Apple Silicon):  ... | sh -s -- --uge
 
 # 2. Pick a model and paste a key. Free tiers and local models in LM Studio or Ollama work.
 pagurus setup
@@ -67,6 +68,23 @@ pagurus doctor        # config, keys, channels, memory use
 ```
 
 Windows (preview), manual downloads, Raspberry Pi notes and building from source: [docs/install.md](docs/install.md).
+
+## Two builds
+
+Same agent, same `~/.pagurus`, same safety rules. Pick by machine; you can switch any time.
+
+| | **smol** (default) | **uge** |
+|---|---|---|
+| For | anything, down to a Raspberry Pi Zero | laptops, desktops and servers |
+| Size | about 3 MB | about 5 MB |
+| Memory, chat apps, checks, reminders, MCP, ssh, sub-agents, the task board | ✓ | ✓ |
+| Terminal chat | plain | streaming answers, line editor, live tool progress, status line |
+| [Coding mode](docs/tools.md#coding-uge-build): edit, search, test and commit in a project | | ✓ |
+| [Headless browser](docs/tools.md#browser-uge-build): JavaScript pages, forms, screenshots, PDFs | | ✓ |
+| Session search | built-in index | SQLite FTS5 |
+| Skills hub, [Tezos art research](docs/art.md) | | ✓ |
+| Platforms | Linux x86_64, arm64, armv7, armv6 · macOS · Windows (preview) | Linux x86_64, arm64 · macOS |
+| Install | `install.sh \| sh` | `install.sh \| sh -s -- --uge` |
 
 ## How it learns
 
@@ -108,7 +126,7 @@ and can be undone. Set `mode = "propose"` to approve each change yourself, or `o
 | **Big jobs** | Parallel sub-agents, a task board that keeps working in the background, and pagurus agents on your other devices that hand each other tasks. |
 | **Sees** | Send it a photo, or let it look at a screenshot. Needs a model that can see images. |
 | **Remembers the chat** | A Telegram, Discord, Slack or email conversation carries on after pagurus restarts or updates, for up to 7 days (`/new` starts fresh). |
-| **uge build** | For laptops and servers, about 4 MB: a richer terminal chat, [coding mode](docs/tools.md#coding-uge-build) (edit, search, test and commit in a project, from Telegram too), a [headless browser](docs/tools.md#browser-uge-build) for JavaScript pages, forms, screenshots and PDFs, the skills hub, and [Tezos art research](docs/art.md) with PDF reports. |
+| **Grows with you** | The [uge build](#two-builds) adds coding in your projects (from Telegram too), a headless browser, a richer terminal and Tezos art research with PDF reports. |
 
 ## Good to know
 
@@ -119,9 +137,8 @@ and can be undone. Set `mode = "propose"` to approve each change yourself, or `o
 - **Secrets stay out.** Files that look like secrets (`~/.ssh`, keys, tokens, `.env`) are never read. API keys live
   in `~/.pagurus/env` (mode 600), and everything sent out is redacted.
 - **It writes only in its own workspace,** and saves a checkpoint before every edit (`/rollback`).
-- **Small by default.** The small build leaves out coding mode and the browser to stay tiny; they are in the uge
-  build. pagurus never drives your desktop. Add what else you need through MCP.
-- **Maturity.** 0.1.0 is the latest release; `main` is 0.2.0 in development, with about 190 tests. Discord, Slack,
+- **Small by default.** smol leaves out coding mode and the browser to stay tiny; they are in uge. pagurus never drives your desktop. Add what else you need through MCP.
+- **Maturity.** 0.1.0 is the latest release; `main` is 0.1.1 in development, with about 190 tests. Discord, Slack,
   email, the task board, the swarm, ssh, the sandbox and the browser have seen the least real use so far. The Windows
   build has not been tried on a real Windows PC.
 
@@ -129,7 +146,7 @@ and can be undone. Set `mode = "propose"` to approve each change yourself, or `o
 
 | Page | What's in it |
 |---|---|
-| [Install](docs/install.md) | Every platform, Windows, the small and uge builds, building from source |
+| [Install](docs/install.md) | Every platform, Windows, smol and uge, building from source |
 | [Talking to pagurus](docs/usage.md) | Commands, approvals, photos and voice; Telegram, Discord, Slack and email setup |
 | [Tools](docs/tools.md) | Every tool, MCP servers, other machines over ssh, the Docker sandbox |
 | [Models](docs/models.md) | Providers, local models, Anthropic, fallbacks, the chat / background / sub-agent roles |

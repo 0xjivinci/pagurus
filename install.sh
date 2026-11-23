@@ -1,10 +1,22 @@
 #!/bin/sh
 # Install pagurus from the GitHub releases.
-#   curl -fsSL https://raw.githubusercontent.com/0xjivinci/pagurus/main/install.sh | sh
-# Options (environment): PAGURUS_VERSION=v0.1.0  PAGURUS_BIN_DIR=/usr/local/bin  PAGURUS_REPO=owner/name
+#   curl -fsSL https://raw.githubusercontent.com/0xjivinci/pagurus/main/install.sh | sh              # smol
+#   curl -fsSL https://raw.githubusercontent.com/0xjivinci/pagurus/main/install.sh | sh -s -- --uge   # uge
+# smol is the small build for anything down to a Pi Zero; uge adds coding, a browser, a richer terminal, …
+# Options (environment): PAGURUS_VERSION=v0.1.1  PAGURUS_BIN_DIR=/usr/local/bin  PAGURUS_REPO=owner/name
+#                        PAGURUS_BUILD=uge (same as --uge)
 set -eu
 REPO="${PAGURUS_REPO:-0xjivinci/pagurus}"
 VERSION="${PAGURUS_VERSION:-}"
+BUILD="${PAGURUS_BUILD:-smol}"
+for a in "$@"; do
+  case "$a" in
+    --uge) BUILD=uge ;;
+    --smol) BUILD=smol ;;
+    -h|--help) sed -n '2,7p' "$0" 2>/dev/null || true; exit 0 ;;
+    *) printf 'pagurus install: unknown option %s (use --uge or --smol)\n' "$a" >&2; exit 1 ;;
+  esac
+done
 
 say() { printf '%s\n' "$*"; }
 die() { printf 'pagurus install: %s\n' "$*" >&2; exit 1; }
@@ -24,6 +36,17 @@ case "$os/$arch" in
   Darwin/arm64)               asset=pagurus-macos-arm64 ;;
   Darwin/x86_64)              die "no Intel-Mac build yet: clone the repo and run 'cargo build --release'" ;;
   *)                          die "no build for $os/$arch yet" ;;
+esac
+case "$BUILD" in
+  smol) ;;
+  uge)
+    case "$asset" in
+      pagurus-linux-armv7|pagurus-linux-armv6) die "uge is built for x86_64, arm64 and Apple Silicon; on 32-bit ARM use smol (no --uge), or a 64-bit OS" ;;
+    esac
+    # v0.1.0 called it "full"
+    case "$VERSION" in v0.1.0) asset=$(printf '%s' "$asset" | sed 's/^pagurus-/pagurus-full-/') ;;
+                       *) asset=$(printf '%s' "$asset" | sed 's/^pagurus-/pagurus-uge-/') ;; esac ;;
+  *) die "PAGURUS_BUILD must be smol or uge" ;;
 esac
 
 if [ -n "${PAGURUS_BIN_DIR:-}" ]; then dir=$PAGURUS_BIN_DIR

@@ -128,6 +128,19 @@ h2 { margin-top: 14px; font-size: clamp(26px, 3.2vw, 38px); line-height: 1.12; f
 .card p { margin-top: 6px; color: var(--mute); font-size: 14.5px; }
 .demo { margin-top: auto; padding-top: 24px; }
 .span-4 { grid-column: span 4; } .span-3 { grid-column: span 3; } .span-2 { grid-column: span 2; }
+/* builds */
+.build .top { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.build .name { font: 700 30px/1 var(--mono); letter-spacing: -.04em; }
+.build .size { font: 500 12.5px var(--mono); color: var(--mute); white-space: nowrap; }
+.build .tag { display: inline-block; margin-left: 8px; padding: 1px 6px; font: 500 11px var(--mono); vertical-align: 6px; letter-spacing: 0; border: 1px solid var(--line-2); color: var(--mute); }
+.build ul { list-style: none; margin-top: 18px; display: grid; gap: 7px; font-size: 14.5px; }
+.build li { display: grid; grid-template-columns: 18px 1fr; }
+.build li::before { content: "+"; font-family: var(--mono); color: var(--mute); }
+.build li.same::before { content: "="; }
+.build { min-width: 0; }
+.build ul { margin-bottom: 26px; }
+.build .install { margin-top: auto; max-width: none; align-items: stretch; }
+.build .install pre { white-space: pre-wrap; word-break: break-all; }
 @media (max-width: 900px) { .bento { grid-template-columns: 1fr 1fr; } .span-3, .span-2 { grid-column: span 1; } .span-4 { grid-column: span 2; } }
 @media (max-width: 600px) { .bento { grid-template-columns: 1fr; } .span-4 { grid-column: span 1; } }
 
@@ -160,6 +173,13 @@ h2 { margin-top: 14px; font-size: clamp(26px, 3.2vw, 38px); line-height: 1.12; f
 .board .col > span { color: var(--mute); font-size: 11px; }
 .board .task { padding: 5px 7px; border: 1px solid var(--line-2); }
 .board .task.run { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+/* phones: let cards shrink to the screen, and their demos wrap instead of pushing it wider */
+.card { min-width: 0; }
+.reach { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.board { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.reach div { min-width: 0; }
+.board .task { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 600px) { .reach { grid-template-columns: 1fr; } .board { font-size: 11px; } }
 
 /* inverted band */
 .band { background: var(--inv-bg); color: var(--inv-fg); border-bottom: 0; padding: 88px 0; }
@@ -233,6 +253,7 @@ footer { padding: 72px 0 36px; overflow: hidden; }
     <nav aria-label="Sections">
       <a class="opt" href="#features">Features</a>
       <a class="opt" href="#how">How it works</a>
+      <a class="opt" href="#builds">Builds</a>
       <a class="opt" href="#faq">FAQ</a>
       <a class="opt" href="https://github.com/0xjivinci/pagurus">GitHub</a>
       <a class="btn sm" href="#install">Install</a>
@@ -246,7 +267,7 @@ footer { padding: 72px 0 36px; overflow: hidden; }
       <div>
         <img class="hero-logo on-light" src="assets/pagurus-lockup-light.svg" alt="pagurus" width="249" height="285">
         <img class="hero-logo on-dark" src="assets/pagurus-lockup-dark.svg" alt="pagurus" width="249" height="290">
-        <span class="pill"><b>v0.1</b> First release · MCP, Discord, Slack and email</span>
+        <span class="pill"><b>v0.1.1</b> New: the uge build, with coding and a browser</span>
         <h1>A tiny AI agent that <em>lives on your hardware.</em></h1>
         <p class="lede">pagurus remembers you, writes its own skills and looks after your machines. One file of about 3&nbsp;MB, on a laptop, a server or a $15 Raspberry Pi&nbsp;Zero.</p>
         <div class="cta">
@@ -374,6 +395,41 @@ footer { padding: 72px 0 36px; overflow: hidden; }
     </div>
   </section>
 
+  <section id="builds">
+    <div class="wrap">
+      <div class="head reveal">
+        <div>
+          <div class="eyebrow">Two builds</div>
+          <h2>Tiny where it has to be. More where there's room.</h2>
+        </div>
+        <p class="sub">Same agent, same memory folder, same safety rules. Pick by machine and switch any time.</p>
+      </div>
+      <div class="bento">
+        <div class="card build span-3 reveal">
+          <div class="top"><span class="name">smol<span class="tag">default</span></span><span class="size">~3 MB · down to a Pi Zero</span></div>
+          <p>Everything on this page: memory and skills, chat apps, checks and reminders, MCP, ssh, sub-agents and the task board.</p>
+          <ul>
+            <li>Runs on Linux x86_64, arm64, armv7 and armv6, macOS and Windows</li>
+            <li>About 6 MB of RAM as a service</li>
+            <li>No coding mode or browser: that's what keeps it this small</li>
+          </ul>
+          <div class="install"><pre>curl -fsSL https://raw.githubusercontent.com/0xjivinci/pagurus/main/install.sh | sh</pre><button class="copy" type="button">Copy</button></div>
+        </div>
+        <div class="card build span-3 reveal">
+          <div class="top"><span class="name">uge</span><span class="size">~5 MB · laptops and servers</span></div>
+          <p>All of smol, plus what's worth a few more megabytes on a bigger machine.</p>
+          <ul>
+            <li>Coding mode: edit, search, test and commit in a project, from Telegram too</li>
+            <li>A headless browser for JavaScript pages, forms, screenshots and PDFs</li>
+            <li>A richer terminal: streaming answers, line editor, live tool progress</li>
+            <li>The skills hub, and Tezos art research with PDF reports</li>
+          </ul>
+          <div class="install"><pre>curl -fsSL https://raw.githubusercontent.com/0xjivinci/pagurus/main/install.sh | sh -s -- --uge</pre><button class="copy" type="button">Copy</button></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <section id="how">
     <div class="wrap">
       <div class="eyebrow reveal">How it works</div>
@@ -412,7 +468,7 @@ footer { padding: 72px 0 36px; overflow: hidden; }
             <div class="code"><pre>pagurus                               <span class="c"># chat in the terminal</span>
 pagurus run "how full is my disk?"    <span class="c"># one question</span></pre><button class="copy" type="button">Copy</button></div></div></li>
         </ol>
-        <p class="note">Static builds for x86_64, arm64, armv7 and armv6 (Pi Zero and Pi 1). Nothing else to install.</p>
+        <p class="note">Static builds for x86_64, arm64, armv7 and armv6 (Pi Zero and Pi 1). Nothing else to install. On a laptop or server, add <code>-s -- --uge</code> after <code>sh</code> for the <a href="#builds">uge build</a>.</p>
       </div>
       <div class="panel" id="p-mac" role="tabpanel" aria-labelledby="t-mac" hidden>
         <ol>
@@ -422,7 +478,7 @@ pagurus run "how full is my disk?"    <span class="c"># one question</span></pre
             <div class="code"><pre>pagurus setup
 pagurus</pre><button class="copy" type="button">Copy</button></div></div></li>
         </ol>
-        <p class="note">Intel Mac: build from source with <code>cargo build --release</code>.</p>
+        <p class="note">For coding mode and the browser, add <code>-s -- --uge</code> after <code>sh</code> (<a href="#builds">uge build</a>). Intel Mac: build from source with <code>cargo build --release</code>.</p>
       </div>
       <div class="panel" id="p-win" role="tabpanel" aria-labelledby="t-win" hidden>
         <ol>
@@ -451,7 +507,8 @@ pagurus</pre><button class="copy" type="button">Copy</button></div></div></li>
         <details><summary>Is it free?</summary><p>pagurus is. Models can be too: OpenRouter, OrcaRouter and Google AI Studio all have free, rate-limited models, and pagurus chains several so the next one answers when one is busy.</p></details>
         <details><summary>Does my data leave my machine?</summary><p>Your messages, and what pagurus reads to answer them, go to the model provider you choose. Memory, skills and transcripts stay local. Use LM Studio or Ollama if nothing should leave your network.</p></details>
         <details><summary>Can it break my system?</summary><p>Read-only commands run on their own. Anything that changes something needs your yes each time. It never runs as root and writes files only in its own workspace.</p></details>
-        <details><summary>What isn't it?</summary><p>Not a coding agent, and it doesn't drive a browser or your desktop. Those are left out on purpose, to stay small. Anything else can come in through an MCP server.</p></details>
+        <details><summary>smol or uge?</summary><p>smol for a Raspberry Pi or anything small and always on. uge for a laptop, desktop or server where you also want it to work on code or use a browser. Both read the same <code>~/.pagurus</code>, so you can switch by installing the other one.</p></details>
+        <details><summary>What isn't it?</summary><p>It never drives your desktop or runs as root. smol leaves out coding and the browser to stay small; uge has them. Anything else can come in through an MCP server.</p></details>
         <details><summary>What hardware does it need?</summary><p>Anything from a Raspberry Pi Zero W (512 MB) up. On a Raspberry Pi the running service uses about 6 MB of RAM.</p></details>
         <details><summary>Does it need the internet?</summary><p>Only to reach your model provider and whatever you connect: chat apps, MCP servers, web search. With a local model in LM Studio or Ollama and the terminal, it runs fully offline.</p></details>
       </div>

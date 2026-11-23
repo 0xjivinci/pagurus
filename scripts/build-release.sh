@@ -6,7 +6,7 @@
 set -eu
 cd "$(dirname "$0")/.."
 BUDGET=3670016      # 3.5 MiB: the small build must stay tiny (x86_64 is the largest)
-FULL_BUDGET=10485760 # 10 MiB: "pagurus uge" (--features uge: SQLite FTS5, the art tool, …)
+UGE_BUDGET=10485760  # 10 MiB: "pagurus uge" (--features uge: coding, browser, the rich terminal, art, …)
 rm -rf dist && # the containers have no git: stamp the build from here (see build.rs)
 PAGURUS_COMMIT=$(git rev-parse --short=7 HEAD 2>/dev/null || true)
 PAGURUS_DATE=$(git log -1 --format=%cs 2>/dev/null || true)
@@ -15,21 +15,22 @@ mkdir -p dist
 
 musl() { # image target output [features]
   echo "== $3"
-  docker run --rm -e PAGURUS_COMMIT -e PAGURUS_DATE -v "$PWD":/src -v "pagurus-cargo-$1":/root/.cargo/registry -e CARGO_TARGET_DIR=/src/target-x/"$1" \
+  docker run --rm -e PAGURUS_COMMIT -e PAGURUS_DATE -v "$PWD":/src -v "pagurus-cargo-$1":/root/.cargo/registry -e CARGO_TARGET_DIR=/src/target-x/"$1${4:+-$4}" \
     -w /src "messense/rust-musl-cross:$1" cargo build --release -q --target "$2" ${4:+--features "$4"}
-  cp "target-x/$1/$2/release/pagurus" "dist/$3"
+  cp "target-x/$1${4:+-$4}/$2/release/pagurus" "dist/$3"
 }
 
 echo "== tests (Linux aarch64)"
 docker run --rm -e PAGURUS_COMMIT -e PAGURUS_DATE -v "$PWD":/src -v pagurus-cargo:/usr/local/cargo/registry -e CARGO_TARGET_DIR=/src/target-linux \
   -w /src rust:1-slim-bookworm sh -c 'cargo test --release -q 2>&1 | grep "test result" &&
-    cargo test --release -q --features full 2>&1 | grep "test result"'
+    cargo test --release -q --features uge 2>&1 | grep "test result"'
 
 musl x86_64-musl        x86_64-unknown-linux-musl       pagurus-linux-x86_64
 musl aarch64-musl       aarch64-unknown-linux-musl      pagurus-linux-arm64
 musl armv7-musleabihf   armv7-unknown-linux-musleabihf  pagurus-linux-armv7
 musl arm-musleabihf     arm-unknown-linux-musleabihf    pagurus-linux-armv6
-musl aarch64-musl       aarch64-unknown-linux-musl      pagurus-full-linux-arm64 full
+musl x86_64-musl        x86_64-unknown-linux-musl       pagurus-uge-linux-x86_64 uge
+musl aarch64-musl       aarch64-unknown-linux-musl      pagurus-uge-linux-arm64 uge
 
 echo "== ARM1176 (Pi Zero W) check under QEMU: an ARMv7 instruction would SIGILL here"
 docker run --rm -e PAGURUS_COMMIT -e PAGURUS_DATE -v "$PWD":/src -v pagurus-cargo-arm-musleabihf:/root/.cargo/registry -e CARGO_TARGET_DIR=/src/target-x/arm-musleabihf \
@@ -53,16 +54,16 @@ if [ "$(uname -s)" = Darwin ] && [ "$(uname -m)" = arm64 ]; then
   echo "== pagurus-macos-arm64"
   cargo build --release -q
   cp target/release/pagurus dist/pagurus-macos-arm64
-  echo "== pagurus-full-macos-arm64"
-  cargo build --release -q --features full
-  cp target/release/pagurus dist/pagurus-full-macos-arm64
+  echo "== pagurus-uge-macos-arm64"
+  cargo build --release -q --features uge
+  cp target/release/pagurus dist/pagurus-uge-macos-arm64
 fi
 
-echo "== size budget ($BUDGET bytes, full builds $FULL_BUDGET) and checksums"
+echo "== size budget ($BUDGET bytes, uge builds $UGE_BUDGET) and checksums"
 fail=0
 for f in dist/pagurus-*; do
   size=$(wc -c < "$f" | tr -d " ")
-  case "$f" in dist/pagurus-full-*) max=$FULL_BUDGET ;; *) max=$BUDGET ;; esac
+  case "$f" in dist/pagurus-uge-*) max=$UGE_BUDGET ;; *) max=$BUDGET ;; esac
   if [ "$size" -gt "$max" ]; then echo "  ✗ $f $size"; fail=1; else echo "  ✓ $f $size"; fi
 done
 (cd dist && shasum -a 256 pagurus-* > SHA256SUMS 2>/dev/null || sha256sum pagurus-* > SHA256SUMS)

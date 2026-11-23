@@ -241,7 +241,7 @@ pub fn tail(s: &str, max: usize) -> String {
     format!("[…]{}", s.chars().skip(n - max).collect::<String>())
 }
 
-/// "0.2.0-dev (uge, 31f947e, 2026-11-22)": the version, which build, and the
+/// "0.1.1-dev (uge, 31f947e, 2026-11-22)": the version, which build, and the
 /// commit it was built from (see build.rs). Plain version where it's unknown.
 pub fn version() -> &'static str {
     static V: std::sync::OnceLock<String> = std::sync::OnceLock::new();
