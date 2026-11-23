@@ -87,7 +87,7 @@ fn load(c: &str, id: &str, budget: &mut usize) -> Result<Piece, String> {
     let sales: Vec<Value> = t["events"].as_array().map(|a| a.iter().map(sale).collect()).unwrap_or_default();
     let month_ago = crate::util::fmt_utc_iso(crate::util::now().saturating_sub(30 * 86_400));
     let primary: Vec<&Value> = listings.iter().filter(|l| l["seller_address"].as_str() == Some(&ca)).collect();
-    let image = embed(&t, budget);
+    let image = embed(&t, c, id, budget);
     Ok(Piece {
         name: t["name"].as_str().filter(|s| !s.is_empty()).unwrap_or("(untitled)").to_string(),
         url: piece_url(c, id),
@@ -113,13 +113,14 @@ fn load(c: &str, id: &str, budget: &mut usize) -> Result<Piece, String> {
 
 /// The piece's picture as a data: URL: the display image, or the thumbnail when
 /// that is too big, won't load, or the report's image budget is spent.
-fn embed(t: &Value, budget: &mut usize) -> Option<String> {
+fn embed(t: &Value, c: &str, id: &str, budget: &mut usize) -> Option<String> {
     let keys: &[&str] = if *budget > 0 { &["display_uri", "thumbnail_uri"] } else { &["thumbnail_uri"] };
-    for k in keys {
-        let urls = image_urls(t[k].as_str().unwrap_or(""));
-        if urls.is_empty() {
-            continue;
-        }
+    let mut tries: Vec<Vec<String>> = keys.iter().map(|k| image_urls(t[*k].as_str().unwrap_or(""))).filter(|u| !u.is_empty()).collect();
+    // objkt's own resized copies, for pieces whose images are huge (an 86 MB animation)
+    for size in ["thumb400", "thumb288"] {
+        tries.push(vec![format!("https://assets.objkt.media/file/assets-003/{c}/{id}/{size}")]);
+    }
+    for urls in tries {
         if let Ok(bytes) = fetch_image(&urls) {
             if let Ok(url) = crate::util::image_data_url(&bytes) {
                 *budget = budget.saturating_sub(bytes.len());
@@ -352,7 +353,10 @@ pub fn report(home: &Path, a: &Value) -> Result<String, String> {
     #[cfg(not(feature = "browser"))]
     let printed = print_pdf(&html, &pdf);
     let (file, made) = match printed {
-        Ok(()) => (pdf, "PDF".to_string()),
+        Ok(()) => {
+            let _ = std::fs::remove_file(&html); // the images make it big; the PDF has it all
+            (pdf, "PDF".to_string())
+        }
         Err(e) => (html.clone(), format!("HTML page (no PDF: {e})")),
     };
     let size = std::fs::metadata(&file).map(|m| m.len()).unwrap_or(0);
