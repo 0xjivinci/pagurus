@@ -763,6 +763,10 @@ mod tests {
 
     #[test]
     fn git_commits_on_an_agent_branch_and_never_runs_hooks() {
+        if Command::new("git").arg("--version").output().is_err() {
+            eprintln!("skipped: git isn't installed");
+            return;
+        }
         let home = std::env::temp_dir().join(format!("pagurus-git-home-{}", crate::util::new_id()));
         let proj = std::env::temp_dir().join(format!("pagurus-git-proj-{}", crate::util::new_id()));
         std::fs::create_dir_all(&proj).unwrap();

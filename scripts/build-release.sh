@@ -22,8 +22,9 @@ musl() { # image target output [features]
 
 echo "== tests (Linux aarch64)"
 docker run --rm -e PAGURUS_COMMIT -e PAGURUS_DATE -v "$PWD":/src -v pagurus-cargo:/usr/local/cargo/registry -e CARGO_TARGET_DIR=/src/target-linux \
-  -w /src rust:1-slim-bookworm sh -c 'cargo test --release -q 2>&1 | grep "test result" &&
-    cargo test --release -q --features uge 2>&1 | grep "test result"'
+  -w /src rust:1-slim-bookworm sh -c 'set -e; for f in "" "--features uge"; do
+    out=$(cargo test --release -q $f 2>&1 || true); echo "$out" | grep "test result"
+    if ! echo "$out" | grep -q "test result: ok"; then echo "$out" | tail -40; echo "tests failed: stopping"; exit 1; fi; done'
 
 musl x86_64-musl        x86_64-unknown-linux-musl       pagurus-linux-x86_64
 musl aarch64-musl       aarch64-unknown-linux-musl      pagurus-linux-arm64
