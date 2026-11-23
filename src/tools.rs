@@ -202,7 +202,8 @@ pub fn definitions(cfg: &Config, set: Set) -> Value {
                  \"YYYY-MM-DD HH:MM\" local time or in_minutes (once, always messages, then removed); daily_at = \"HH:MM\" \
                  (+ weekday mon…sun for weekly). For thresholds prefer a CHECK, which runs without the model: task = \
                  \"`command` > 70 label\" (> < >= <=); it compares the first number printed and alerts once on crossing and \
-                 once on recovery, e.g. `vcgencmd measure_temp`, `df --output=pcent /`; checks may run every minute. \
+                 once on recovery, e.g. `vcgencmd measure_temp`; checks may run every minute. Local web service: \
+                 `http://127.0.0.1:8080/` < 1 (1 up, 0 down). \
                  Tasks are unattended: read-only commands only.",
                 crate::tasks::MIN_EVERY,
                 cfg.daemon.heartbeat_minutes,
@@ -835,10 +836,42 @@ pub fn run_check(home: &Path, cfg: &Config, cmd: &str) -> Result<String, String>
     if let Some(out) = crate::art::check(cmd) {
         return out;
     }
+    if cmd.starts_with("http://") || cmd.starts_with("https://") {
+        return http_check(cmd.trim());
+    }
     if let Some(why) = needs_approval(home, &cfg.tools.shell_allow, cmd) {
         return Err(format!("check not run: {why}"));
     }
     run(cmd, &home.join("workspace"), cfg.tools.shell_timeout_secs.min(20))
+}
+
+/// A heartbeat check that a local web service answers: "1 (HTTP 200, 8 ms)" when it
+/// does, "0 (…)" when it's down, hung or failing. In-process, no shell, and only for
+/// this machine or the home network, so a check can't carry data off to the internet.
+fn http_check(url: &str) -> Result<String, String> {
+    use std::net::{IpAddr, ToSocketAddrs};
+    let host = url.split("://").nth(1).unwrap_or("").split(['/', '?', '#']).next().unwrap_or("");
+    let netloc = if host.rsplit_once(':').is_some_and(|(_, p)| p.parse::<u16>().is_ok()) && !host.ends_with(']') {
+        host.to_string()
+    } else {
+        format!("{host}:{}", if url.starts_with("https") { 443 } else { 80 })
+    };
+    let local = |ip: IpAddr| match ip {
+        IpAddr::V4(v) => v.is_loopback() || v.is_private(),
+        IpAddr::V6(v) => v.is_loopback() || (v.segments()[0] & 0xfe00) == 0xfc00,
+    };
+    let addrs: Vec<_> = netloc.to_socket_addrs().map_err(|e| format!("{host}: {e}"))?.collect();
+    if addrs.is_empty() || !addrs.iter().all(|a| local(a.ip())) {
+        return Err("http checks only reach this machine or the home network".into());
+    }
+    let t0 = std::time::Instant::now();
+    let agent = ureq::AgentBuilder::new().timeout(Duration::from_secs(8)).redirects(0).build();
+    Ok(match agent.get(url).call() {
+        Ok(r) => format!("1 (HTTP {}, {} ms)", r.status(), t0.elapsed().as_millis()),
+        Err(ureq::Error::Status(code, _)) if code < 400 => format!("1 (HTTP {code})"),
+        Err(ureq::Error::Status(code, _)) => format!("0 (HTTP {code})"),
+        Err(e) => format!("0 ({})", crate::util::one_line(&e.to_string(), 100)),
+    })
 }
 
 /// Files queued by `send_file` during the current job (one job runs at a time);
@@ -1899,6 +1932,40 @@ mod tests {
             }
         });
         port
+    }
+
+    #[test]
+    fn http_checks_answer_1_or_0_and_stay_local() {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            use std::io::{Read, Write};
+            for (i, s) in l.incoming().flatten().enumerate() {
+                let mut s = s;
+                let _ = s.read(&mut [0u8; 1024]);
+                let status = if i == 0 { "200 OK" } else { "503 Busy" };
+                let _ = write!(s, "HTTP/1.1 {status}\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok");
+            }
+        });
+        let url = format!("http://127.0.0.1:{port}/");
+        assert!(super::http_check(&url).unwrap().starts_with("1 (HTTP 200"));
+        assert!(super::http_check(&url).unwrap().starts_with("0 (HTTP 503"));
+        assert_eq!(crate::tasks::first_number(&super::http_check(&url).unwrap()), Some(0.0));
+        assert!(super::http_check("https://example.com/?leak=1").unwrap_err().contains("home network"));
+    }
+
+    #[test]
+    fn pi_monitoring_checks_run_without_approval() {
+        let home = std::env::temp_dir();
+        let allow: Vec<String> = crate::config::SAFE_COMMANDS.iter().map(|s| s.to_string()).collect();
+        for cmd in [
+            "systemctl is-active anoniverse anoniverse-tunnel world-dashboard world-presence olibith-button | grep -vc '^active$'",
+            "pgrep -c -x olibith-kiosk",
+            "pgrep -c -f '[w]orld-kiosk'",
+            "journalctl -u anoniverse-tunnel --since '-6 min' --no-pager | grep -c trycloudflare.com",
+        ] {
+            assert_eq!(super::needs_approval(&home, &allow, cmd), None, "{cmd}");
+        }
     }
 
     #[test]
