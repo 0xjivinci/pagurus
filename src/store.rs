@@ -124,11 +124,11 @@ pub fn parse_when(s: &str) -> Option<u64> {
 }
 
 const STOP: &[&str] = &[
-    "the", "and", "for", "are", "was", "were", "that", "this", "with", "you", "your", "have", "has", "had", "not", "but",
-    "from", "they", "what", "can", "will", "would", "there", "their", "its", "it's", "our", "out", "all", "any", "how",
-    "about", "into", "than", "then", "them", "these", "those", "just", "also", "been", "being", "did", "does", "which",
-    "who", "when", "where", "why", "a", "an", "is", "it", "of", "on", "or", "to", "in", "at", "be", "as", "by", "we",
-    "me", "my", "so", "if", "do", "no", "i",
+    "the", "and", "for", "are", "was", "were", "that", "this", "with", "you", "your", "have", "has", "had", "not",
+    "but", "from", "they", "what", "can", "will", "would", "there", "their", "its", "it's", "our", "out", "all", "any",
+    "how", "about", "into", "than", "then", "them", "these", "those", "just", "also", "been", "being", "did", "does",
+    "which", "who", "when", "where", "why", "a", "an", "is", "it", "of", "on", "or", "to", "in", "at", "be", "as",
+    "by", "we", "me", "my", "so", "if", "do", "no", "i",
 ];
 
 /// A light English stemmer: plurals and -ing/-ed, so "tunnels" finds "tunnel".
@@ -136,8 +136,13 @@ fn stem(w: &str) -> String {
     if !w.chars().all(|c| c.is_alphabetic()) || w.len() < 4 {
         return w.into();
     }
-    for (suf, min, rep) in [("ies", 5, "y"), ("sses", 5, "ss"), ("ing", 6, ""), ("ed", 5, ""), ("es", 5, ""), ("s", 4, "")] {
-        if w.len() >= min && w.ends_with(suf) && !(suf == "s" && (w.ends_with("ss") || w.ends_with("us") || w.ends_with("is"))) {
+    for (suf, min, rep) in
+        [("ies", 5, "y"), ("sses", 5, "ss"), ("ing", 6, ""), ("ed", 5, ""), ("es", 5, ""), ("s", 4, "")]
+    {
+        if w.len() >= min
+            && w.ends_with(suf)
+            && !(suf == "s" && (w.ends_with("ss") || w.ends_with("us") || w.ends_with("is")))
+        {
             if suf == "es" && !(w.ends_with("shes") || w.ends_with("ches") || w.ends_with("xes")) {
                 continue; // "files" → "file" via the plain -s rule
             }
@@ -180,7 +185,11 @@ fn query_words(q: &str, stemmed: bool) -> Vec<(String, bool)> {
         for (i, (at, t)) in toks.iter().enumerate() {
             // `deploy*`: the last word unstemmed, matched as a prefix
             let p = prefix && i + 1 == toks.len();
-            let t = if p { w[*at..].chars().take_while(|c| c.is_alphanumeric()).collect::<String>().to_lowercase() } else { t.clone() };
+            let t = if p {
+                w[*at..].chars().take_while(|c| c.is_alphanumeric()).collect::<String>().to_lowercase()
+            } else {
+                t.clone()
+            };
             if !v.iter().any(|x| x.0 == t) {
                 v.push((t, p));
             }
@@ -283,7 +292,8 @@ pub fn user_sessions(home: &Path, text: &str, limit: usize, skip: &str) -> Vec<S
     let hits = fts::search(home, &q, &query_words(text, false));
     #[cfg(not(feature = "sqlite"))]
     let hits = index::search(home, &q, &terms);
-    let mut sids: Vec<String> = hits.unwrap_or_default().into_iter().filter(|h| h.role == "user").map(|h| h.sid).collect();
+    let mut sids: Vec<String> =
+        hits.unwrap_or_default().into_iter().filter(|h| h.role == "user").map(|h| h.sid).collect();
     sids.sort();
     sids.dedup();
     sids
@@ -335,7 +345,11 @@ mod tests {
 
     pub fn append(home: &std::path::Path, sid: &str, msgs: Lines) {
         use std::io::Write;
-        let mut f = std::fs::OpenOptions::new().create(true).append(true).open(home.join(format!("sessions/{sid}.jsonl"))).unwrap();
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(home.join(format!("sessions/{sid}.jsonl")))
+            .unwrap();
         for (t, role, text) in msgs {
             writeln!(f, "{}", serde_json::json!({"t": t, "m": {"role": role, "content": text}})).unwrap();
         }
@@ -351,7 +365,11 @@ mod tests {
         assert_eq!(t, ["tunnel", "restart", "file", "box", "runn"]);
         assert_eq!(super::channel("1762178520-tg-ab12cd"), "tg");
         assert_eq!(super::query_terms("deploy* the Tunnels"), vec![("deploy".into(), true), ("tunnel".into(), false)]);
-        let s = super::snippet(&format!("{} the cloudflare tunnel url changed {}", "x ".repeat(200), "y ".repeat(200)), &super::query_terms("tunnel"), 80);
+        let s = super::snippet(
+            &format!("{} the cloudflare tunnel url changed {}", "x ".repeat(200), "y ".repeat(200)),
+            &super::query_terms("tunnel"),
+            80,
+        );
         assert!(s.starts_with('…') && s.contains("cloudflare tunnel url") && s.ends_with('…'), "{s}");
         assert!(super::parse_when("7d").unwrap() + 7 * 86_400 >= crate::util::now());
         assert!(super::parse_when("2026-06-01").is_some() && super::parse_when("soon").is_none());
@@ -361,14 +379,29 @@ mod tests {
     fn search_ranks_filters_and_shows_context() {
         let now = crate::util::now();
         let home = home_with(&[
-            ("100-tg-a", &[(now - 900_000, "user", "the cloudflare tunnel url changed again"), (now - 899_990, "assistant", "I restarted cloudflared")]),
-            ("200-cli-b", &[(now - 100, "user", "grafana dashboard loads slowly"), (now - 90, "assistant", "the tunnel is fine, grafana needed more memory"),
-                            (now - 80, "user", "thanks")]),
+            (
+                "100-tg-a",
+                &[
+                    (now - 900_000, "user", "the cloudflare tunnel url changed again"),
+                    (now - 899_990, "assistant", "I restarted cloudflared"),
+                ],
+            ),
+            (
+                "200-cli-b",
+                &[
+                    (now - 100, "user", "grafana dashboard loads slowly"),
+                    (now - 90, "assistant", "the tunnel is fine, grafana needed more memory"),
+                    (now - 80, "user", "thanks"),
+                ],
+            ),
         ]);
         let r = super::search(&home, &q("cloudflare tunnel"));
         assert!(r.starts_with('[') && r.contains("» user: the cloudflare tunnel url changed"), "{r}");
         assert!(r.contains("  assistant: I restarted cloudflared"), "context after the hit: {r}");
-        assert!(r.find("cloudflare tunnel url").unwrap() < r.find("grafana needed").unwrap(), "both terms rank first: {r}");
+        assert!(
+            r.find("cloudflare tunnel url").unwrap() < r.find("grafana needed").unwrap(),
+            "both terms rank first: {r}"
+        );
         let r = super::search(&home, &q("grafana"));
         assert!(r.contains("  user: grafana dashboard loads slowly") || r.contains("» user: grafana dashboard"), "{r}");
         let mut f = q("tunnel");

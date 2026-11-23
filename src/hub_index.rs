@@ -30,7 +30,11 @@ pub struct Entry {
 
 impl Entry {
     pub fn id(&self) -> String {
-        if self.path.is_empty() { self.repo.clone() } else { format!("{}/{}", self.repo, self.path) }
+        if self.path.is_empty() {
+            self.repo.clone()
+        } else {
+            format!("{}/{}", self.repo, self.path)
+        }
     }
 
     fn url(&self) -> String {
@@ -39,12 +43,29 @@ impl Entry {
 
     fn line(&self) -> String {
         let f = |s: &str| s.replace(['\t', '\n', '\r'], " ");
-        format!("{}\t{}\t{}\t{}\t{}\t{}\t{}\n", f(&self.trust), f(&self.source), f(&self.name), f(&self.desc), f(&self.repo), f(&self.path), f(&self.tags))
+        format!(
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
+            f(&self.trust),
+            f(&self.source),
+            f(&self.name),
+            f(&self.desc),
+            f(&self.repo),
+            f(&self.path),
+            f(&self.tags)
+        )
     }
 
     fn parse(l: &str) -> Option<Entry> {
         let mut it = l.split('\t').map(String::from);
-        Some(Entry { trust: it.next()?, source: it.next()?, name: it.next()?, desc: it.next()?, repo: it.next()?, path: it.next()?, tags: it.next().unwrap_or_default() })
+        Some(Entry {
+            trust: it.next()?,
+            source: it.next()?,
+            name: it.next()?,
+            desc: it.next()?,
+            repo: it.next()?,
+            path: it.next()?,
+            tags: it.next().unwrap_or_default(),
+        })
     }
 }
 
@@ -137,7 +158,8 @@ impl<'de, W: Write> serde::de::Visitor<'de> for Index<'_, W> {
 fn convert(r: impl Read, out: &mut impl Write) -> Result<usize, String> {
     let mut n = 0;
     let mut de = serde_json::Deserializer::from_reader(std::io::BufReader::new(r));
-    serde::Deserializer::deserialize_map(&mut de, Index(out, &mut n)).map_err(|e| format!("unreadable skills index: {e}"))?;
+    serde::Deserializer::deserialize_map(&mut de, Index(out, &mut n))
+        .map_err(|e| format!("unreadable skills index: {e}"))?;
     Ok(n)
 }
 
@@ -187,7 +209,8 @@ pub fn refresh(home: &Path, cfg: &Config) -> Result<usize, String> {
 fn each_entry(home: &Path, cfg: &Config, mut f: impl FnMut(Entry)) -> Result<(), String> {
     use std::io::BufRead;
     let path = index_file(home);
-    let age = std::fs::metadata(&path).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).map(|d| d.as_secs());
+    let age =
+        std::fs::metadata(&path).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).map(|d| d.as_secs());
     if age.is_none_or(|a| a > INDEX_MAX_AGE_SECS) {
         if let Err(e) = refresh(home, cfg) {
             if age.is_none() {
@@ -221,7 +244,12 @@ struct Ranker {
 
 impl Ranker {
     fn new(query: &str, n: usize) -> Ranker {
-        let words = query.to_lowercase().split(|c: char| !c.is_alphanumeric()).filter(|w| w.len() >= 2).map(String::from).collect();
+        let words = query
+            .to_lowercase()
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|w| w.len() >= 2)
+            .map(String::from)
+            .collect();
         Ranker { words, n, best: Vec::new() }
     }
 
@@ -233,13 +261,24 @@ impl Ranker {
         let (name, tags, desc) = (e.name.to_lowercase(), e.tags.to_lowercase(), e.desc.to_lowercase());
         let mut score = 0;
         for w in &self.words {
-            score += if name.contains(w.as_str()) { 6 } else if tags.contains(w.as_str()) { 3 } else if desc.contains(w.as_str()) { 1 } else { return None };
+            score += if name.contains(w.as_str()) {
+                6
+            } else if tags.contains(w.as_str()) {
+                3
+            } else if desc.contains(w.as_str()) {
+                1
+            } else {
+                return None;
+            };
         }
-        Some(score + match e.trust.as_str() {
-            "builtin" => 4,
-            "trusted" => 2,
-            _ => 0,
-        })
+        Some(
+            score
+                + match e.trust.as_str() {
+                    "builtin" => 4,
+                    "trusted" => 2,
+                    _ => 0,
+                },
+        )
     }
 
     fn add(&mut self, e: Entry) {
@@ -280,7 +319,8 @@ pub fn search_text(home: &Path, cfg: &Config, query: &str, n: usize) -> Result<S
     let mut out = format!("Skills hub, best matches for \"{query}\" (install with the id):\n");
     for e in hits {
         let trust = if e.trust == "community" { "community ⚠" } else { e.trust.as_str() };
-        out += &format!("- {} — {} [{trust}, {}]\n  id: {}\n", e.name, crate::util::clip(&e.desc, 160), e.source, e.id());
+        out +=
+            &format!("- {} — {} [{trust}, {}]\n  id: {}\n", e.name, crate::util::clip(&e.desc, 160), e.source, e.id());
     }
     Ok(out)
 }
@@ -288,7 +328,13 @@ pub fn search_text(home: &Path, cfg: &Config, query: &str, n: usize) -> Result<S
 /// A hub name or id → (GitHub URL, trust). None when `src` is a URL or a path.
 pub(crate) fn resolve(home: &Path, cfg: &Config, src: &str) -> Result<Option<(String, String)>, String> {
     let s = src.trim();
-    if s.starts_with("https://") || s.starts_with("http://") || crate::util::expand(s).exists() || s.starts_with('/') || s.starts_with('.') || s.starts_with('~') {
+    if s.starts_with("https://")
+        || s.starts_with("http://")
+        || crate::util::expand(s).exists()
+        || s.starts_with('/')
+        || s.starts_with('.')
+        || s.starts_with('~')
+    {
         return Ok(None);
     }
     // only the entries that match are kept
@@ -313,11 +359,17 @@ pub(crate) fn resolve(home: &Path, cfg: &Config, src: &str) -> Result<Option<(St
         [] => Err(format!("no skill named `{s}` in the hub; try `pagurus skills search {s}`")),
         [e] => Ok(Some((e.url(), e.trust.clone()))),
         // one reviewed source beats any number of community copies
-        [e, rest @ ..] if e.trust != "community" && rest.iter().all(|r| r.trust == "community") => Ok(Some((e.url(), e.trust.clone()))),
+        [e, rest @ ..] if e.trust != "community" && rest.iter().all(|r| r.trust == "community") => {
+            Ok(Some((e.url(), e.trust.clone())))
+        }
         many => Err(format!(
             "{} skills are called `{s}`; install one by its id:\n{}",
             many.len(),
-            many.iter().take(8).map(|e| format!("  {} [{}] {}", e.id(), e.trust, crate::util::clip(&e.desc, 80))).collect::<Vec<_>>().join("\n")
+            many.iter()
+                .take(8)
+                .map(|e| format!("  {} [{}] {}", e.id(), e.trust, crate::util::clip(&e.desc, 80)))
+                .collect::<Vec<_>>()
+                .join("\n")
         )),
     }
 }
@@ -349,16 +401,41 @@ mod tests {
     #[test]
     fn hub_names_resolve_to_github_and_prefer_reviewed_sources() {
         let home = std::env::temp_dir().join(format!("pagurus-hubidx-{}", crate::util::new_id()));
-        let e = |trust: &str, repo: &str, name: &str| Entry { trust: trust.into(), source: "s".into(), name: name.into(), desc: "d".into(), repo: repo.into(), path: format!("skills/{name}"), tags: String::new() };
-        let lines: String = [e("builtin", "o/official", "pdf"), e("community", "x/copy", "pdf"), e("community", "y/one", "notes"), e("community", "z/two", "notes")].iter().map(Entry::line).collect();
+        let e = |trust: &str, repo: &str, name: &str| Entry {
+            trust: trust.into(),
+            source: "s".into(),
+            name: name.into(),
+            desc: "d".into(),
+            repo: repo.into(),
+            path: format!("skills/{name}"),
+            tags: String::new(),
+        };
+        let lines: String = [
+            e("builtin", "o/official", "pdf"),
+            e("community", "x/copy", "pdf"),
+            e("community", "y/one", "notes"),
+            e("community", "z/two", "notes"),
+        ]
+        .iter()
+        .map(Entry::line)
+        .collect();
         crate::util::write_atomic(&index_file(&home), &lines).unwrap();
         let cfg = Config::default();
-        assert_eq!(resolve(&home, &cfg, "pdf").unwrap().unwrap(), ("https://github.com/o/official/tree/HEAD/skills/pdf".into(), "builtin".into()));
+        assert_eq!(
+            resolve(&home, &cfg, "pdf").unwrap().unwrap(),
+            ("https://github.com/o/official/tree/HEAD/skills/pdf".into(), "builtin".into())
+        );
         assert!(resolve(&home, &cfg, "notes").unwrap_err().contains("install one by its id"));
-        assert_eq!(resolve(&home, &cfg, "z/two/skills/notes").unwrap().unwrap().0, "https://github.com/z/two/tree/HEAD/skills/notes");
+        assert_eq!(
+            resolve(&home, &cfg, "z/two/skills/notes").unwrap().unwrap().0,
+            "https://github.com/z/two/tree/HEAD/skills/notes"
+        );
         assert!(resolve(&home, &cfg, "nope").unwrap_err().contains("skills search"));
         assert_eq!(resolve(&home, &cfg, "https://example.com/SKILL.md").unwrap(), None);
-        assert_eq!(crate::hub::raw_url("https://github.com/o/official/tree/HEAD/skills/pdf").unwrap().0, "https://raw.githubusercontent.com/o/official/HEAD/skills/pdf/SKILL.md");
+        assert_eq!(
+            crate::hub::raw_url("https://github.com/o/official/tree/HEAD/skills/pdf").unwrap().0,
+            "https://raw.githubusercontent.com/o/official/HEAD/skills/pdf/SKILL.md"
+        );
         let _ = std::fs::remove_dir_all(&home);
     }
 }

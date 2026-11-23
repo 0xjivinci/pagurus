@@ -140,7 +140,17 @@ pub fn start(cmd: &str, cwd: &Path, minutes: u64) -> Result<String, String> {
     let id = v.iter().map(|p| p.id).max().unwrap_or(0) + 1;
     let minutes = minutes.clamp(1, MAX_MINUTES);
     let t = now();
-    v.push(Proc { id, cmd: cmd.to_string(), started: t, deadline: t + minutes * 60, child: Some(child), out, seen: 0, exit: None, told: false });
+    v.push(Proc {
+        id,
+        cmd: cmd.to_string(),
+        started: t,
+        deadline: t + minutes * 60,
+        child: Some(child),
+        out,
+        seen: 0,
+        exit: None,
+        told: false,
+    });
     Ok(format!(
         "started background process #{id} (killed after {minutes} min). Check it later with process action=output id={id}; \
          don't wait for it in a loop."
@@ -179,7 +189,9 @@ pub fn kill(id: u32) -> Result<String, String> {
     let mut v = PROCS.lock().map_err(|_| "process table unavailable")?;
     refresh(&mut v);
     let p = v.iter_mut().find(|p| p.id == id).ok_or_else(|| format!("no background process #{id}"))?;
-    let Some(mut child) = p.child.take() else { return Ok(format!("#{id} had already ended ({})", p.exit.clone().unwrap_or_default())) };
+    let Some(mut child) = p.child.take() else {
+        return Ok(format!("#{id} had already ended ({})", p.exit.clone().unwrap_or_default()));
+    };
     kill_tree(child.id());
     let _ = child.kill();
     let _ = child.wait();
@@ -236,7 +248,10 @@ mod tests {
         let id2: u32 = r.split('#').nth(1).unwrap().split(' ').next().unwrap().parse().unwrap();
         settle();
         let msgs = take_finished();
-        assert!(msgs.iter().any(|m| m.contains(&format!("#{id2}")) && m.contains("exit 0") && m.contains("done-here")), "{msgs:?}");
+        assert!(
+            msgs.iter().any(|m| m.contains(&format!("#{id2}")) && m.contains("exit 0") && m.contains("done-here")),
+            "{msgs:?}"
+        );
         assert!(take_finished().iter().all(|m| !m.contains(&format!("#{id2}"))));
         assert!(output(999).is_err());
     }

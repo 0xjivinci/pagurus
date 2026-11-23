@@ -105,7 +105,8 @@ pub fn valid_name(n: &str) -> Result<(), String> {
 }
 
 fn tidy_name(n: &str) -> String {
-    let s: String = n.to_lowercase().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).take(32).collect();
+    let s: String =
+        n.to_lowercase().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).take(32).collect();
     let s = s.trim_matches('-').to_string();
     if s.is_empty() {
         "pagurus".into()
@@ -120,7 +121,10 @@ pub fn self_name(cfg: &Config) -> String {
     }
     let host = read(Path::new("/etc/hostname")).trim().to_string();
     let host = if host.is_empty() {
-        std::process::Command::new("hostname").output().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default()
+        std::process::Command::new("hostname")
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_default()
     } else {
         host
     };
@@ -128,7 +132,9 @@ pub fn self_name(cfg: &Config) -> String {
 }
 
 fn valid_url(u: &str) -> bool {
-    (u.starts_with("http://") || u.starts_with("https://")) && u.len() <= 200 && !u.chars().any(|c| c.is_whitespace() || c.is_control())
+    (u.starts_with("http://") || u.starts_with("https://"))
+        && u.len() <= 200
+        && !u.chars().any(|c| c.is_whitespace() || c.is_control())
 }
 
 // ---------- storage: peers.json (names, urls) + secrets in the env file ----------
@@ -138,7 +144,10 @@ pub fn load(home: &Path) -> Vec<Peer> {
 }
 
 fn save(home: &Path, peers: &[Peer]) -> Result<(), String> {
-    crate::util::write_private(&home.join("peers.json"), &serde_json::to_string_pretty(peers).map_err(|e| e.to_string())?)
+    crate::util::write_private(
+        &home.join("peers.json"),
+        &serde_json::to_string_pretty(peers).map_err(|e| e.to_string())?,
+    )
 }
 
 pub fn names(home: &Path) -> Vec<String> {
@@ -152,7 +161,10 @@ fn key_var(name: &str) -> String {
 /// Read fresh from the env file each time: pairing happens while the daemon runs.
 fn secret(home: &Path, name: &str) -> Option<Vec<u8>> {
     let k = format!("{}=", key_var(name));
-    read(&home.join("env")).lines().find_map(|l| l.trim().strip_prefix(&k).and_then(|v| unhex(v.trim()))).filter(|s| s.len() == 32)
+    read(&home.join("env"))
+        .lines()
+        .find_map(|l| l.trim().strip_prefix(&k).and_then(|v| unhex(v.trim())))
+        .filter(|s| s.len() == 32)
 }
 
 fn store(home: &Path, peer: Peer, key: &[u8]) -> Result<(), String> {
@@ -172,7 +184,8 @@ pub fn remove(home: &Path, name: &str) -> Result<String, String> {
     }
     save(home, &all)?;
     let k = format!("{}=", key_var(name));
-    let env: Vec<String> = read(&home.join("env")).lines().filter(|l| !l.trim().starts_with(&k)).map(String::from).collect();
+    let env: Vec<String> =
+        read(&home.join("env")).lines().filter(|l| !l.trim().starts_with(&k)).map(String::from).collect();
     crate::util::write_private(&home.join("env"), &(env.join("\n") + "\n"))?;
     Ok(format!("removed peer `{name}` and its key"))
 }
@@ -196,7 +209,8 @@ fn fresh_nonce(peer: &str, nonce: &str, t: u64) -> bool {
 /// Check a signed request. Returns the peer's key, to sign the answer with.
 fn authenticate(home: &Path, h: &Headers, method: &str, path: &str, body: &[u8]) -> Result<(String, Vec<u8>), String> {
     let get = |k: &str| h.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str()).unwrap_or("");
-    let (peer, time, nonce, sig) = (get("x-pagurus-peer"), get("x-pagurus-time"), get("x-pagurus-nonce"), get("x-pagurus-sig"));
+    let (peer, time, nonce, sig) =
+        (get("x-pagurus-peer"), get("x-pagurus-time"), get("x-pagurus-nonce"), get("x-pagurus-sig"));
     valid_name(peer).map_err(|_| "unknown peer".to_string())?;
     let key = secret(home, peer).ok_or("unknown peer")?;
     let t: u64 = time.parse().map_err(|_| "bad timestamp")?;
@@ -292,7 +306,8 @@ pub fn serve(home: PathBuf, cfg: Config, hooks: Arc<Hooks>) -> Result<Option<std
     if cfg.peer.listen.trim().is_empty() {
         return Ok(None);
     }
-    let l = std::net::TcpListener::bind(cfg.peer.listen.trim()).map_err(|e| format!("peer.listen {}: {e}", cfg.peer.listen))?;
+    let l = std::net::TcpListener::bind(cfg.peer.listen.trim())
+        .map_err(|e| format!("peer.listen {}: {e}", cfg.peer.listen))?;
     let addr = l.local_addr().map_err(|e| e.to_string())?;
     let srv = Arc::new(Server { home, cfg, hooks, busy: AtomicUsize::new(0), conns: AtomicUsize::new(0) });
     std::thread::Builder::new()
@@ -348,9 +363,13 @@ impl Server {
                 return respond(&s, 401, &json!({ "error": e }).to_string(), None);
             }
         };
-        let nonce = req.headers.iter().find(|(k, _)| k == "x-pagurus-nonce").map(|(_, v)| v.clone()).unwrap_or_default();
+        let nonce =
+            req.headers.iter().find(|(k, _)| k == "x-pagurus-nonce").map(|(_, v)| v.clone()).unwrap_or_default();
         let (code, body) = match req.path.as_str() {
-            "/ping" => (200, json!({ "name": self_name(&self.cfg), "version": env!("CARGO_PKG_VERSION"), "busy": self.busy.load(Ordering::SeqCst) })),
+            "/ping" => (
+                200,
+                json!({ "name": self_name(&self.cfg), "version": env!("CARGO_PKG_VERSION"), "busy": self.busy.load(Ordering::SeqCst) }),
+            ),
             "/ask" => self.ask(&peer, &req.body),
             _ => (404, json!({ "error": "not found" })),
         };
@@ -374,7 +393,13 @@ impl Server {
         // this machine's owner decides; the peer can't approve anything here
         let ask = |cmd: &str| (self.hooks.approve)(&format!("{cmd}\n{label}"));
         let intro = format!("{}\nThe peer is called `{peer}`.", crate::agent::PEER_INTRO);
-        let r = crate::agent::run_sub(&self.home, &self.cfg, task, &intro, if self.hooks.can_ask { Some(&ask) } else { None });
+        let r = crate::agent::run_sub(
+            &self.home,
+            &self.cfg,
+            task,
+            &intro,
+            if self.hooks.can_ask { Some(&ask) } else { None },
+        );
         self.busy.fetch_sub(1, Ordering::SeqCst);
         match r {
             Ok((report, calls)) => (200, json!({ "report": clip(&redact(report.trim()), 8000), "calls": calls })),
@@ -385,7 +410,8 @@ impl Server {
     /// The asked side of pairing: check the code, finish the key exchange, remember the peer.
     fn pair(&self, body: &[u8]) -> Result<Value, String> {
         let p = self.home.join("pairing-secret.json");
-        let mut st: Value = serde_json::from_str(&read(&p)).map_err(|_| "no pairing code is active here (run `pagurus peer pair`)")?;
+        let mut st: Value =
+            serde_json::from_str(&read(&p)).map_err(|_| "no pairing code is active here (run `pagurus peer pair`)")?;
         let code = st["code"].as_str().unwrap_or("").to_string();
         if code.len() != 6 || now() > st["expires"].as_u64().unwrap_or(0) {
             let _ = std::fs::remove_file(&p);
@@ -393,8 +419,13 @@ impl Server {
         }
         let v: Value = serde_json::from_slice(body).map_err(|_| "bad request")?;
         let s = |k: &str| v[k].as_str().unwrap_or("").to_string();
-        let (name, url, pub_a, you_as) = (tidy_name(&s("name")), s("url"), unhex(&s("pub")).ok_or("bad key")?, s("you_as"));
-        if !verify(code.as_bytes(), &[b"pair1", &pub_a, s("name").as_bytes(), url.as_bytes(), you_as.as_bytes()], &s("mac")) {
+        let (name, url, pub_a, you_as) =
+            (tidy_name(&s("name")), s("url"), unhex(&s("pub")).ok_or("bad key")?, s("you_as"));
+        if !verify(
+            code.as_bytes(),
+            &[b"pair1", &pub_a, s("name").as_bytes(), url.as_bytes(), you_as.as_bytes()],
+            &s("mac"),
+        ) {
             let tries = st["tries"].as_u64().unwrap_or(0) + 1;
             if tries >= PAIR_TRIES as u64 {
                 let _ = std::fs::remove_file(&p);
@@ -409,17 +440,22 @@ impl Server {
             return Err("bad url or name".into());
         }
         let rng = ring::rand::SystemRandom::new();
-        let mine = agreement::EphemeralPrivateKey::generate(&agreement::X25519, &rng).map_err(|_| "key generation failed")?;
+        let mine =
+            agreement::EphemeralPrivateKey::generate(&agreement::X25519, &rng).map_err(|_| "key generation failed")?;
         let pub_b = mine.compute_public_key().map_err(|_| "key generation failed")?.as_ref().to_vec();
-        let key = agreement::agree_ephemeral(mine, &agreement::UnparsedPublicKey::new(&agreement::X25519, &pub_a), |sh| {
-            derive(sh, &code, &pub_a, &pub_b)
-        })
-        .map_err(|_| "bad key")?;
+        let key =
+            agreement::agree_ephemeral(mine, &agreement::UnparsedPublicKey::new(&agreement::X25519, &pub_a), |sh| {
+                derive(sh, &code, &pub_a, &pub_b)
+            })
+            .map_err(|_| "bad key")?;
         let _ = std::fs::remove_file(&p); // one-time
         store(&self.home, Peer { name: name.clone(), url: url.clone(), me_as: you_as, added: now() }, &key)?;
         let me = self_name(&self.cfg);
         let mac = sign(&key, &[b"pair2", &pub_a, &pub_b, name.as_bytes(), me.as_bytes()]);
-        (self.hooks.notify)(format!("🤝 paired with pagurus `{name}`{}", if url.is_empty() { String::new() } else { format!(" ({url})") }));
+        (self.hooks.notify)(format!(
+            "🤝 paired with pagurus `{name}`{}",
+            if url.is_empty() { String::new() } else { format!(" ({url})") }
+        ));
         Ok(json!({ "name": me, "as": name, "pub": hex(&pub_b), "mac": mac }))
     }
 }
@@ -437,7 +473,10 @@ fn http(timeout: Duration) -> ureq::Agent {
 fn find(home: &Path, name: &str) -> Result<Peer, String> {
     load(home).into_iter().find(|p| p.name == name).ok_or_else(|| {
         let known = names(home);
-        format!("no peer `{name}`; paired: {}", if known.is_empty() { "none (pagurus peer add)".into() } else { known.join(", ") })
+        format!(
+            "no peer `{name}`; paired: {}",
+            if known.is_empty() { "none (pagurus peer add)".into() } else { known.join(", ") }
+        )
     })
 }
 
@@ -489,22 +528,40 @@ pub fn ask(home: &Path, cfg: &Config, name: &str, task: &str) -> Result<String, 
         return Err("task is longer than 32 KB; put details in a file the peer can read".into());
     }
     eprintln!("  ⇄ asking peer {name}: {}", one_line(&task, 100));
-    let v = call(home, &peer, "/ask", &json!({ "task": task }).to_string(), Duration::from_secs(cfg.peer.timeout_minutes.max(1) * 60))?;
+    let v = call(
+        home,
+        &peer,
+        "/ask",
+        &json!({ "task": task }).to_string(),
+        Duration::from_secs(cfg.peer.timeout_minutes.max(1) * 60),
+    )?;
     Ok(clip(&redact(v["report"].as_str().unwrap_or("").trim()), 8000))
 }
 
 pub fn ping(home: &Path, peer: &Peer) -> Result<String, String> {
     let v = call(home, peer, "/ping", "{}", Duration::from_secs(5))?;
     let busy = v["busy"].as_u64().unwrap_or(0);
-    Ok(format!("{} v{}{}", v["name"].as_str().unwrap_or("?"), v["version"].as_str().unwrap_or("?"), if busy > 0 { " (busy)" } else { "" }))
+    Ok(format!(
+        "{} v{}{}",
+        v["name"].as_str().unwrap_or("?"),
+        v["version"].as_str().unwrap_or("?"),
+        if busy > 0 { " (busy)" } else { "" }
+    ))
 }
 
 /// `pagurus peer pair`: a one-time code for another pagurus's `pagurus peer add`.
 pub fn pair_code(home: &Path, cfg: &Config) -> Result<String, String> {
     let r = random(4)?;
     let code = format!("{:06}", u32::from_be_bytes([r[0], r[1], r[2], r[3]]) % 1_000_000);
-    crate::util::write_private(&home.join("pairing-secret.json"), &json!({ "code": code, "expires": now() + PAIR_SECS, "tries": 0 }).to_string())?;
-    let url = if !cfg.peer.url.is_empty() { cfg.peer.url.clone() } else { format!("http://{}", if cfg.peer.listen.is_empty() { "<this machine>:7717" } else { &cfg.peer.listen }) };
+    crate::util::write_private(
+        &home.join("pairing-secret.json"),
+        &json!({ "code": code, "expires": now() + PAIR_SECS, "tries": 0 }).to_string(),
+    )?;
+    let url = if !cfg.peer.url.is_empty() {
+        cfg.peer.url.clone()
+    } else {
+        format!("http://{}", if cfg.peer.listen.is_empty() { "<this machine>:7717" } else { &cfg.peer.listen })
+    };
     let mut s = format!(
         "Pairing code: {code} (valid {} min, one use)\nOn the other pagurus run:\n  pagurus peer add {} {url} {code}",
         PAIR_SECS / 60,
@@ -527,7 +584,8 @@ pub fn add(home: &Path, cfg: &Config, name: &str, url: &str, code: &str) -> Resu
         return Err("the code is the 6 digits `pagurus peer pair` showed on the other machine".into());
     }
     let rng = ring::rand::SystemRandom::new();
-    let mine = agreement::EphemeralPrivateKey::generate(&agreement::X25519, &rng).map_err(|_| "key generation failed")?;
+    let mine =
+        agreement::EphemeralPrivateKey::generate(&agreement::X25519, &rng).map_err(|_| "key generation failed")?;
     let pub_a = mine.compute_public_key().map_err(|_| "key generation failed")?.as_ref().to_vec();
     let me = self_name(cfg);
     let my_url = cfg.peer.url.trim().to_string();
@@ -545,10 +603,14 @@ pub fn add(home: &Path, cfg: &Config, name: &str, url: &str, code: &str) -> Resu
     };
     let s = |k: &str| v[k].as_str().unwrap_or("").to_string();
     let pub_b = unhex(&s("pub")).ok_or("bad answer")?;
-    let key = agreement::agree_ephemeral(mine, &agreement::UnparsedPublicKey::new(&agreement::X25519, &pub_b), |sh| derive(sh, code, &pub_a, &pub_b))
-        .map_err(|_| "bad key in the answer")?;
+    let key = agreement::agree_ephemeral(mine, &agreement::UnparsedPublicKey::new(&agreement::X25519, &pub_b), |sh| {
+        derive(sh, code, &pub_a, &pub_b)
+    })
+    .map_err(|_| "bad key in the answer")?;
     let me_as = s("as");
-    if valid_name(&me_as).is_err() || !verify(&key, &[b"pair2", &pub_a, &pub_b, me_as.as_bytes(), s("name").as_bytes()], &s("mac")) {
+    if valid_name(&me_as).is_err()
+        || !verify(&key, &[b"pair2", &pub_a, &pub_b, me_as.as_bytes(), s("name").as_bytes()], &s("mac"))
+    {
         return Err("the answer didn't prove knowledge of the code; not paired".into());
     }
     store(home, Peer { name: name.into(), url: url.into(), me_as: me_as.clone(), added: now() }, &key)?;
@@ -600,7 +662,10 @@ pub fn cli(home: &Path, cfg: &Config, args: &[String]) -> Result<String, String>
         ["add", name, url, code] => add(home, cfg, name, url, code),
         ["remove" | "rm", name] => remove(home, name),
         ["ask", name, task @ ..] if !task.is_empty() => ask(home, cfg, name, &task.join(" ")),
-        _ => Err("usage: pagurus peer [list] · pair · add <name> <url> <code> · remove <name> · ask <name> <task…>".into()),
+        _ => {
+            Err("usage: pagurus peer [list] · pair · add <name> <url> <code> · remove <name> · ask <name> <task…>"
+                .into())
+        }
     }
 }
 
@@ -668,13 +733,24 @@ mod tests {
         assert!(authenticate(&h, &ok, "POST", "/ask", b"{}").is_ok());
         assert_eq!(authenticate(&h, &ok, "POST", "/ask", b"{}").unwrap_err(), "replayed request");
         let n2 = hex(&random(16).unwrap());
-        assert_eq!(authenticate(&h, &signed(now(), &n2, &[1u8; 32]), "POST", "/ask", b"{\"x\":1}").unwrap_err(), "bad signature");
-        assert!(authenticate(&h, &signed(now() - 600, &n2, &[1u8; 32]), "POST", "/ask", b"{}").unwrap_err().contains("timestamp"));
-        assert_eq!(authenticate(&h, &signed(now(), &n2, &[2u8; 32]), "POST", "/ask", b"{}").unwrap_err(), "bad signature");
+        assert_eq!(
+            authenticate(&h, &signed(now(), &n2, &[1u8; 32]), "POST", "/ask", b"{\"x\":1}").unwrap_err(),
+            "bad signature"
+        );
+        assert!(authenticate(&h, &signed(now() - 600, &n2, &[1u8; 32]), "POST", "/ask", b"{}")
+            .unwrap_err()
+            .contains("timestamp"));
+        assert_eq!(
+            authenticate(&h, &signed(now(), &n2, &[2u8; 32]), "POST", "/ask", b"{}").unwrap_err(),
+            "bad signature"
+        );
         let mut stranger = signed(now(), &n2, &[1u8; 32]);
         stranger[0].1 = "eve".into();
         assert_eq!(authenticate(&h, &stranger, "POST", "/ask", b"{}").unwrap_err(), "unknown peer");
-        assert!(authenticate(&h, &signed(now(), &n2, &[1u8; 32]), "POST", "/ask", b"{}").is_ok(), "the untouched one still works");
+        assert!(
+            authenticate(&h, &signed(now(), &n2, &[1u8; 32]), "POST", "/ask", b"{}").is_ok(),
+            "the untouched one still works"
+        );
     }
 
     #[test]
@@ -729,7 +805,8 @@ mod tests {
         // a board task for the peer
         let mut ca = ca;
         ca.peer.known = names(&ha);
-        let id = crate::board::with(&ha, |b| b.create("B's uptime", "report it", "bee", &[], 1, now())).unwrap().unwrap();
+        let id =
+            crate::board::with(&ha, |b| b.create("B's uptime", "report it", "bee", &[], 1, now())).unwrap().unwrap();
         let task = crate::board::with(&ha, |b| b.claim("t", now(), |_| true)).unwrap().unwrap();
         assert_eq!(task.id, id);
         let r = crate::board::run_task(&ha, &ca, &hooks(), &task, "B's uptime, please").unwrap();
@@ -738,7 +815,9 @@ mod tests {
         // a forged peer gets nothing
         let fake = Peer { name: "bee".into(), url: cb.peer.url.clone(), me_as: "ant".into(), added: 0 };
         crate::util::set_env_value(&ha, &key_var("bee"), &hex(&[9u8; 32])).unwrap();
-        assert!(call(&ha, &fake, "/ping", "{}", Duration::from_secs(5)).unwrap_err().contains("without a valid signature"));
+        assert!(call(&ha, &fake, "/ping", "{}", Duration::from_secs(5))
+            .unwrap_err()
+            .contains("without a valid signature"));
         assert!(remove(&ha, "bee").is_ok() && secret(&ha, "bee").is_none());
     }
 }

@@ -72,11 +72,15 @@ pub fn first_number(s: &str) -> Option<f64> {
     let b = s.as_bytes();
     let mut i = 0;
     while i < b.len() {
-        let neg = b[i] == b'-' && b.get(i + 1).is_some_and(u8::is_ascii_digit) && (i == 0 || !b[i - 1].is_ascii_alphanumeric());
+        let neg = b[i] == b'-'
+            && b.get(i + 1).is_some_and(u8::is_ascii_digit)
+            && (i == 0 || !b[i - 1].is_ascii_alphanumeric());
         if b[i].is_ascii_digit() || neg {
             let start = i;
             i += 1;
-            while i < b.len() && (b[i].is_ascii_digit() || (b[i] == b'.' && b.get(i + 1).is_some_and(u8::is_ascii_digit))) {
+            while i < b.len()
+                && (b[i].is_ascii_digit() || (b[i] == b'.' && b.get(i + 1).is_some_and(u8::is_ascii_digit)))
+            {
                 i += 1;
             }
             return s[start..i].parse().ok();
@@ -273,7 +277,8 @@ pub fn add(home: &Path, text: &str, every: Option<u64>, at: Option<u64>, cal: Op
 /// Drop a one-off task after it ran (exact text match).
 pub fn finish(home: &Path, text: &str) {
     let body = read(&file(home));
-    let kept: Vec<&str> = body.lines().filter(|l| parse_line(l).is_none_or(|t| t.at.is_none() || t.text != text)).collect();
+    let kept: Vec<&str> =
+        body.lines().filter(|l| parse_line(l).is_none_or(|t| t.at.is_none() || t.text != text)).collect();
     let _ = write_atomic(&file(home), &(kept.join("\n") + "\n"));
 }
 
@@ -308,7 +313,10 @@ mod tests {
 
     #[test]
     fn parse_intervals() {
-        assert_eq!(parse_line("- check disk"), Some(Task { every: None, at: None, cal: None, text: "check disk".into() }));
+        assert_eq!(
+            parse_line("- check disk"),
+            Some(Task { every: None, at: None, cal: None, text: "check disk".into() })
+        );
         let d = parse_line("- [daily 08:30] morning status").unwrap();
         assert_eq!(d.cal, Some(Cal { weekday: None, minute: 510 }));
         assert_eq!(render(&d), "- [daily 08:30] morning status");
@@ -317,7 +325,10 @@ mod tests {
         let c = parse_line("- [every 1m] `vcgencmd measure_temp` > 70 Pi is hot").unwrap();
         assert_eq!(c.every, Some(1), "checks may run every minute");
         let chk = c.check().unwrap();
-        assert_eq!((chk.cmd.as_str(), chk.op.as_str(), chk.limit, chk.label.as_str()), ("vcgencmd measure_temp", ">", 70.0, "Pi is hot"));
+        assert_eq!(
+            (chk.cmd.as_str(), chk.op.as_str(), chk.limit, chk.label.as_str()),
+            ("vcgencmd measure_temp", ">", 70.0, "Pi is hot")
+        );
         assert!(chk.tripped(71.2) && !chk.tripped(70.0));
         assert!(!chk.recovered(68.0) && chk.recovered(66.4), "back to normal only clearly below 70");
         assert!(parse_check("`x` > 0").unwrap().recovered(0.0), "a count is back to normal at 0");

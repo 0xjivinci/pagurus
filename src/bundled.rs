@@ -53,7 +53,14 @@ pub fn install_new(home: &Path) -> Vec<String> {
             installed.push(name.to_string());
         }
     }
-    let all: Vec<&str> = SKILLS.iter().chain(EXTRA).map(|(n, _)| *n).chain(offered.iter().copied()).collect::<std::collections::BTreeSet<_>>().into_iter().collect();
+    let all: Vec<&str> = SKILLS
+        .iter()
+        .chain(EXTRA)
+        .map(|(n, _)| *n)
+        .chain(offered.iter().copied())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
     if all.len() != offered.len() {
         let _ = crate::util::write_atomic(&marker, &(all.join("\n") + "\n"));
     }

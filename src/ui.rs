@@ -187,7 +187,8 @@ impl Reader {
     }
 
     pub fn read(&mut self) -> Option<String> {
-        let yolo = crate::autonomy::yolo_left().map(|l| format!("⚡{} ", crate::autonomy::fmt_left(l))).unwrap_or_default();
+        let yolo =
+            crate::autonomy::yolo_left().map(|l| format!("⚡{} ", crate::autonomy::fmt_left(l))).unwrap_or_default();
         #[cfg(all(feature = "tui", unix))]
         if let Some(ed) = self.ed.as_mut() {
             let w = yolo.chars().count() + 2;

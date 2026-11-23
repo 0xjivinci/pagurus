@@ -59,11 +59,19 @@ fn http() -> ureq::Agent {
 }
 
 /// A multipart/form-data body: text fields, then one file. Returns (content type, body).
-pub fn multipart(fields: &[(&str, &str)], file_field: &str, filename: &str, mime: &str, bytes: &[u8]) -> (String, Vec<u8>) {
+pub fn multipart(
+    fields: &[(&str, &str)],
+    file_field: &str,
+    filename: &str,
+    mime: &str,
+    bytes: &[u8],
+) -> (String, Vec<u8>) {
     let boundary = format!("pagurus{}", crate::util::new_id());
     let mut body = Vec::with_capacity(bytes.len() + 512);
     for (k, v) in fields {
-        body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n").as_bytes());
+        body.extend_from_slice(
+            format!("--{boundary}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n").as_bytes(),
+        );
     }
     body.extend_from_slice(
         format!("--{boundary}\r\nContent-Disposition: form-data; name=\"{file_field}\"; filename=\"{filename}\"\r\nContent-Type: {mime}\r\n\r\n")
@@ -85,7 +93,8 @@ pub fn transcribe(c: &VoiceCfg, audio: &[u8]) -> Result<String, String> {
                     /audio/transcriptions endpoint, e.g. Groq or a local whisper server)"
             .into());
     }
-    let (ct, body) = multipart(&[("model", &c.stt_model), ("response_format", "json")], "file", "voice.ogg", "audio/ogg", audio);
+    let (ct, body) =
+        multipart(&[("model", &c.stt_model), ("response_format", "json")], "file", "voice.ogg", "audio/ogg", audio);
     let mut req = http().post(&endpoint(&c.stt_url, "audio/transcriptions")).set("Content-Type", &ct);
     if let Some(k) = key(&c.stt_key_env) {
         req = req.set("Authorization", &format!("Bearer {k}"));
@@ -93,7 +102,10 @@ pub fn transcribe(c: &VoiceCfg, audio: &[u8]) -> Result<String, String> {
     let v: serde_json::Value = match req.send_bytes(&body) {
         Ok(r) => r.into_json().map_err(|e| format!("transcription: {e}"))?,
         Err(ureq::Error::Status(code, r)) => {
-            return Err(format!("transcription failed: HTTP {code} {}", crate::util::one_line(&r.into_string().unwrap_or_default(), 160)))
+            return Err(format!(
+                "transcription failed: HTTP {code} {}",
+                crate::util::one_line(&r.into_string().unwrap_or_default(), 160)
+            ))
         }
         Err(e) => return Err(format!("transcription failed: {e}")),
     };
@@ -111,7 +123,8 @@ pub fn speak(c: &VoiceCfg, text: &str) -> Result<Vec<u8>, String> {
     if let Some(k) = key(&c.tts_key_env) {
         req = req.set("Authorization", &format!("Bearer {k}"));
     }
-    let r = req.send_json(body).map_err(|e| format!("speech failed: {}", crate::util::one_line(&e.to_string(), 160)))?;
+    let r =
+        req.send_json(body).map_err(|e| format!("speech failed: {}", crate::util::one_line(&e.to_string(), 160)))?;
     let mut buf = Vec::new();
     r.into_reader().take(20 * 1024 * 1024).read_to_end(&mut buf).map_err(|e| e.to_string())?;
     Ok(buf)
@@ -168,10 +181,17 @@ mod tests {
         c.speak = "always".into();
         assert!(should_speak(&c, 6));
         assert!(transcribe(&VoiceCfg::default(), b"x").unwrap_err().contains("stt_url"));
-        assert_eq!(speakable("## Disk\n- **/** is 80% full, see https://x.y/z\n```\ndf\n```"), "Disk\n/ is 80% full, see (link)\ndf\n");
+        assert_eq!(
+            speakable("## Disk\n- **/** is 80% full, see https://x.y/z\n```\ndf\n```"),
+            "Disk\n/ is 80% full, see (link)\ndf\n"
+        );
         let (ct, body) = multipart(&[("model", "m")], "file", "a.ogg", "audio/ogg", b"OGG");
         let b = String::from_utf8_lossy(&body);
-        assert!(ct.starts_with("multipart/form-data; boundary=") && b.contains("name=\"model\"\r\n\r\nm\r\n") && b.contains("OGG\r\n--"));
+        assert!(
+            ct.starts_with("multipart/form-data; boundary=")
+                && b.contains("name=\"model\"\r\n\r\nm\r\n")
+                && b.contains("OGG\r\n--")
+        );
     }
 
     /// A fake OpenAI-compatible transcription server on localhost.
@@ -197,9 +217,15 @@ mod tests {
             }
             let mut body = vec![0; len];
             r.read_exact(&mut body).unwrap();
-            let ok = first.starts_with("POST /v1/audio/transcriptions") && String::from_utf8_lossy(&body).contains("OggS");
+            let ok =
+                first.starts_with("POST /v1/audio/transcriptions") && String::from_utf8_lossy(&body).contains("OggS");
             let reply = if ok { r#"{"text":" check the disk "}"# } else { r#"{"text":""}"# };
-            write!(&s, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{reply}", reply.len()).unwrap();
+            write!(
+                &s,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{reply}",
+                reply.len()
+            )
+            .unwrap();
         });
         let c = VoiceCfg { stt_url: format!("http://127.0.0.1:{port}/v1/"), ..Default::default() };
         assert_eq!(transcribe(&c, b"OggS...").unwrap(), "check the disk");

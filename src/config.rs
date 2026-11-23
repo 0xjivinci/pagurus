@@ -71,7 +71,14 @@ pub struct PeerCfg {
 
 impl Default for PeerCfg {
     fn default() -> Self {
-        Self { listen: String::new(), name: String::new(), url: String::new(), max_tasks: 1, timeout_minutes: 15, known: vec![] }
+        Self {
+            listen: String::new(),
+            name: String::new(),
+            url: String::new(),
+            max_tasks: 1,
+            timeout_minutes: 15,
+            known: vec![],
+        }
     }
 }
 
@@ -147,12 +154,23 @@ impl Route {
 impl Provider {
     fn spell(&self, f: &Fallback) -> Route {
         let base_url = f.base_url.clone().unwrap_or_else(|| self.base_url.clone());
-        let api = f.api.clone().unwrap_or_else(|| if base_url == self.base_url { self.api.clone() } else { String::new() });
-        Route { model: f.model.clone(), api_key_env: f.api_key_env.clone().unwrap_or_else(|| self.api_key_env.clone()), base_url, api }
+        let api =
+            f.api.clone().unwrap_or_else(|| if base_url == self.base_url { self.api.clone() } else { String::new() });
+        Route {
+            model: f.model.clone(),
+            api_key_env: f.api_key_env.clone().unwrap_or_else(|| self.api_key_env.clone()),
+            base_url,
+            api,
+        }
     }
 
     pub fn main_route(&self) -> Route {
-        Route { model: self.model.clone(), base_url: self.base_url.clone(), api_key_env: self.api_key_env.clone(), api: self.api.clone() }
+        Route {
+            model: self.model.clone(),
+            base_url: self.base_url.clone(),
+            api_key_env: self.api_key_env.clone(),
+            api: self.api.clone(),
+        }
     }
 
     /// The model chain in order: main, then fallbacks.
@@ -224,7 +242,12 @@ impl Config {
 
 /// `/model` choices persist in `$PAGURUS_HOME/model`: "chat <base_url> <model>"
 /// and "background <base_url> <model>" lines, applied over config.toml.
-pub fn save_model(home: &Path, chat: Option<&Route>, background: Option<&Route>, delegate: Option<&Route>) -> Result<(), String> {
+pub fn save_model(
+    home: &Path,
+    chat: Option<&Route>,
+    background: Option<&Route>,
+    delegate: Option<&Route>,
+) -> Result<(), String> {
     let mut lines: Vec<String> = Vec::new();
     for (kind, r) in [("chat", chat), ("background", background), ("delegate", delegate)] {
         if let Some(r) = r {
@@ -238,9 +261,12 @@ fn apply_model_file(home: &Path, c: &mut Config) {
     let text = std::fs::read_to_string(home.join("model")).unwrap_or_default();
     for line in text.lines() {
         let mut w = line.split_whitespace();
-        let (Some(kind), Some(base), Some(env), Some(model)) = (w.next(), w.next(), w.next(), w.next()) else { continue };
+        let (Some(kind), Some(base), Some(env), Some(model)) = (w.next(), w.next(), w.next(), w.next()) else {
+            continue;
+        };
         // the configured choice carries the api mode, which the file doesn't record
-        let Some(r) = c.provider.choices().into_iter().find(|r| r.model == model && r.base_url == base && r.api_key_env == env)
+        let Some(r) =
+            c.provider.choices().into_iter().find(|r| r.model == model && r.base_url == base && r.api_key_env == env)
         else {
             continue; // removed from config.toml since: ignore
         };
@@ -295,7 +321,11 @@ pub fn model_command(home: &Path, cfg: &Config, args: &str) -> Result<(String, O
             let hits: Vec<&Route> = choices.iter().filter(|r| r.model == pick || r.model.contains(&pick)).collect();
             match hits.as_slice() {
                 [one] => (*one).clone(),
-                [] => return Err(format!("no model matches `{pick}`; /model lists them (add more as [[provider.option]] in config.toml)")),
+                [] => {
+                    return Err(format!(
+                        "no model matches `{pick}`; /model lists them (add more as [[provider.option]] in config.toml)"
+                    ))
+                }
                 many => match many.iter().find(|r| r.model == pick) {
                     Some(exact) => (*exact).clone(),
                     None => return Err(format!("`{pick}` matches {} models; use the number", many.len())),
@@ -362,7 +392,15 @@ pub struct AgentCfg {
 
 impl Default for AgentCfg {
     fn default() -> Self {
-        Self { max_iterations: 16, turn_budget_secs: 600, delegate_iterations: 8, delegate_parallel: 3, max_history: 24, summarize: true, context_chars: 24_000 }
+        Self {
+            max_iterations: 16,
+            turn_budget_secs: 600,
+            delegate_iterations: 8,
+            delegate_parallel: 3,
+            max_history: 24,
+            summarize: true,
+            context_chars: 24_000,
+        }
     }
 }
 
@@ -436,26 +474,95 @@ pub struct ToolsCfg {
 /// Two-word entries allow only that subcommand.
 #[cfg_attr(windows, allow(dead_code))]
 pub const SAFE_COMMANDS: &[&str] = &[
-    "uptime", "df", "du", "free", "date", "uname", "whoami", "id", "groups", "hostname", "ps", "pgrep", "ls", "stat",
-    "file", "which", "cat", "head", "tail", "grep", "wc", "sort", "cut", "tr", "echo", "vcgencmd", "lsusb", "lsblk",
-    "ip", "ss", "ping", "journalctl", "systemctl status", "systemctl is-active", "systemctl is-enabled",
-    "systemctl is-failed", "systemctl show", "systemctl list-units", "systemctl list-unit-files", "systemctl list-timers",
-    "systemctl cat", "systemctl --user status", "systemctl --user is-active", "systemctl --user show",
-    "systemctl --user list-units", "systemctl --user list-timers", "top -b",
+    "uptime",
+    "df",
+    "du",
+    "free",
+    "date",
+    "uname",
+    "whoami",
+    "id",
+    "groups",
+    "hostname",
+    "ps",
+    "pgrep",
+    "ls",
+    "stat",
+    "file",
+    "which",
+    "cat",
+    "head",
+    "tail",
+    "grep",
+    "wc",
+    "sort",
+    "cut",
+    "tr",
+    "echo",
+    "vcgencmd",
+    "lsusb",
+    "lsblk",
+    "ip",
+    "ss",
+    "ping",
+    "journalctl",
+    "systemctl status",
+    "systemctl is-active",
+    "systemctl is-enabled",
+    "systemctl is-failed",
+    "systemctl show",
+    "systemctl list-units",
+    "systemctl list-unit-files",
+    "systemctl list-timers",
+    "systemctl cat",
+    "systemctl --user status",
+    "systemctl --user is-active",
+    "systemctl --user show",
+    "systemctl --user list-units",
+    "systemctl --user list-timers",
+    "top -b",
 ];
 
 /// Extra read-only commands on macOS (no `free`, `ip`, `ss` or systemd there).
 #[cfg(target_os = "macos")]
 pub const SAFE_COMMANDS_MACOS: &[&str] = &[
-    "sw_vers", "vm_stat", "sysctl", "memory_pressure", "top -l", "diskutil list", "diskutil info", "pmset -g",
-    "launchctl list", "system_profiler", "netstat", "ifconfig", "lsof -i", "log show",
+    "sw_vers",
+    "vm_stat",
+    "sysctl",
+    "memory_pressure",
+    "top -l",
+    "diskutil list",
+    "diskutil info",
+    "pmset -g",
+    "launchctl list",
+    "system_profiler",
+    "netstat",
+    "ifconfig",
+    "lsof -i",
+    "log show",
 ];
 
 /// On Windows the read-only commands are different ones.
 #[cfg(windows)]
 pub const SAFE_COMMANDS_WINDOWS: &[&str] = &[
-    "whoami", "hostname", "ver", "systeminfo", "tasklist", "ipconfig", "netstat", "ping", "dir", "type", "findstr",
-    "where", "echo", "date /t", "time /t", "wmic logicaldisk get", "sc query", "Get-Process",
+    "whoami",
+    "hostname",
+    "ver",
+    "systeminfo",
+    "tasklist",
+    "ipconfig",
+    "netstat",
+    "ping",
+    "dir",
+    "type",
+    "findstr",
+    "where",
+    "echo",
+    "date /t",
+    "time /t",
+    "wmic logicaldisk get",
+    "sc query",
+    "Get-Process",
 ];
 
 impl Default for ToolsCfg {
@@ -508,8 +615,8 @@ fn default_tg_env() -> String {
 
 pub fn load(home: &Path) -> Result<Config, String> {
     let p = home.join("config.toml");
-    let s = std::fs::read_to_string(&p)
-        .map_err(|_| format!("no config at {} — run `pagurus init` first", p.display()))?;
+    let s =
+        std::fs::read_to_string(&p).map_err(|_| format!("no config at {} — run `pagurus init` first", p.display()))?;
     let mut c: Config = toml::from_str(&s).map_err(|e| format!("{}: {e}", p.display()))?;
     c.provider.all = c.provider.choices();
     apply_model_file(home, &mut c);
@@ -712,7 +819,11 @@ mod tests {
         assert_eq!(c.provider.choices()[2].model, "flash", "numbering stays in config order");
         assert_eq!(c.provider.background_route().unwrap().model, "lite");
         assert_eq!(names(&c.background().provider)[0], "lite");
-        assert_eq!(names(&c.for_delegate().provider), vec!["free", "flash", "lite"], "sub-agents fall back to the chat chain");
+        assert_eq!(
+            names(&c.for_delegate().provider),
+            vec!["free", "flash", "lite"],
+            "sub-agents fall back to the chat chain"
+        );
     }
 
     #[test]

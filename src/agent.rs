@@ -74,7 +74,9 @@ impl Progress {
     /// Record a call; returns how many times this exact call (name and
     /// arguments, key order ignored) has now been made in this turn.
     fn call(&mut self, name: &str, args: &str) -> u32 {
-        let args = serde_json::from_str::<serde_json::Value>(args).map(|v| v.to_string()).unwrap_or_else(|_| args.trim().to_string());
+        let args = serde_json::from_str::<serde_json::Value>(args)
+            .map(|v| v.to_string())
+            .unwrap_or_else(|_| args.trim().to_string());
         let n = self.calls.entry(hash(&format!("{name}\0{args}"))).or_insert(0);
         *n += 1;
         *n
@@ -118,7 +120,27 @@ impl Agent {
         let _ = std::fs::create_dir_all(home.join("workspace"));
         let system = system_prompt(&home, &cfg);
         let session = Session::new(&home, kind);
-        Ok(Self { home, cfg, llm, bg, session, system, history: Vec::new(), summary: String::new(), pins: Vec::new(), interactive, set: Set::Full, taint: String::new(), last_skills: Vec::new(), feedback: Vec::new(), turns_since_review: 0, tools_since_review: 0, inbox: Inbox::default(), trim_upto: Default::default(), detached: false })
+        Ok(Self {
+            home,
+            cfg,
+            llm,
+            bg,
+            session,
+            system,
+            history: Vec::new(),
+            summary: String::new(),
+            pins: Vec::new(),
+            interactive,
+            set: Set::Full,
+            taint: String::new(),
+            last_skills: Vec::new(),
+            feedback: Vec::new(),
+            turns_since_review: 0,
+            tools_since_review: 0,
+            inbox: Inbox::default(),
+            trim_upto: Default::default(),
+            detached: false,
+        })
     }
 
     /// Continue an earlier conversation (the daemon's chats after a restart): its
@@ -143,7 +165,8 @@ impl Agent {
     /// messages is cut to a short stub. Old command output is the biggest and
     /// least useful part of a long chat, and trimming it costs nothing.
     fn trimmed(&self) -> Vec<Msg> {
-        let users: Vec<usize> = self.history.iter().enumerate().filter(|(_, m)| m.role == "user").map(|(i, _)| i).collect();
+        let users: Vec<usize> =
+            self.history.iter().enumerate().filter(|(_, m)| m.role == "user").map(|(i, _)| i).collect();
         let recent = if users.len() >= 2 { users[users.len() - 2] } else { 0 };
         let upto = self.trim_upto.get().min(self.history.len());
         self.history
@@ -156,7 +179,10 @@ impl Agent {
                     Msg { images: vec![], content: Some(format!("{c} [image no longer attached]")), ..m.clone() }
                 } else if (i < recent || i < upto) && m.role == "tool" && c.chars().count() > OLD_TOOL_CHARS {
                     let head: String = c.chars().take(OLD_TOOL_CHARS).collect();
-                    Msg { content: Some(format!("{head}… [older output trimmed; run the tool again if you need it]")), ..m.clone() }
+                    Msg {
+                        content: Some(format!("{head}… [older output trimmed; run the tool again if you need it]")),
+                        ..m.clone()
+                    }
                 } else {
                     m.clone()
                 }
@@ -421,7 +447,12 @@ impl Agent {
                         continue;
                     }
                 }
-                if !sent_file && !crate::tools::has_attachments() && !claim_checked && round < rounds && claims_sending(&text) {
+                if !sent_file
+                    && !crate::tools::has_attachments()
+                    && !claim_checked
+                    && round < rounds
+                    && claims_sending(&text)
+                {
                     claim_checked = true;
                     self.push(Msg::user(
                         "[pagurus: your answer says a file or image is being sent, but you haven't called send_file in this \
@@ -441,15 +472,26 @@ impl Agent {
                 eprintln!("{}", text.trim());
             }
             // read-only calls that need nobody's approval run side by side (top + ps + journalctl at once)
-            let repeats: Vec<u32> = calls.iter().map(|c| progress.call(&c.function.name, &c.function.arguments)).collect();
+            let repeats: Vec<u32> =
+                calls.iter().map(|c| progress.call(&c.function.name, &c.function.arguments)).collect();
             let mut early: Vec<Option<String>> = vec![None; calls.len()];
             if !crate::util::cancelled() {
-                let ctx = Ctx { home: &self.home, cfg: &self.cfg, session: &self.session.id, interactive: self.interactive, approver: None };
+                let ctx = Ctx {
+                    home: &self.home,
+                    cfg: &self.cfg,
+                    session: &self.session.id,
+                    interactive: self.interactive,
+                    approver: None,
+                };
                 let par: Vec<usize> = (0..calls.len())
-                    .filter(|&i| repeats[i] < 3 && tools::parallel_safe(&ctx, &calls[i].function.name, &calls[i].function.arguments))
+                    .filter(|&i| {
+                        repeats[i] < 3
+                            && tools::parallel_safe(&ctx, &calls[i].function.name, &calls[i].function.arguments)
+                    })
                     .collect();
                 if par.len() >= 2 {
-                    let (home, cfg, sid, inter, set) = (&self.home, &self.cfg, self.session.id.as_str(), self.interactive, self.set);
+                    let (home, cfg, sid, inter, set) =
+                        (&self.home, &self.cfg, self.session.id.as_str(), self.interactive, self.set);
                     let outs: Vec<(usize, String, f64)> = std::thread::scope(|sc| {
                         let hs: Vec<_> = par
                             .iter()
@@ -459,7 +501,11 @@ impl Agent {
                                 sc.spawn(move || {
                                     let ctx = Ctx { home, cfg, session: sid, interactive: inter, approver: None };
                                     let t0 = std::time::Instant::now();
-                                    (i, tools::execute(&ctx, set, &c.function.name, &c.function.arguments), t0.elapsed().as_secs_f64())
+                                    (
+                                        i,
+                                        tools::execute(&ctx, set, &c.function.name, &c.function.arguments),
+                                        t0.elapsed().as_secs_f64(),
+                                    )
                                 })
                             })
                             .collect();
@@ -537,7 +583,9 @@ impl Agent {
                 forced = Some(format!("the last {stale} tool rounds found nothing new"));
                 None
             } else if stale >= 2 {
-                Some(format!("[note: the last {stale} rounds found nothing new. Change approach, or answer with what you have.]"))
+                Some(format!(
+                    "[note: the last {stale} rounds found nothing new. Change approach, or answer with what you have.]"
+                ))
             } else {
                 budget_note(round, rounds)
             };
@@ -631,7 +679,6 @@ impl Agent {
         self.push(Msg::assistant(text));
         text.to_string()
     }
-
 
     fn settle_skills(&mut self, viewed: Vec<String>, ok: bool) {
         for n in &viewed {
@@ -747,7 +794,8 @@ impl Agent {
             return;
         }
         // the stretch since the last review: what the signals are judged on
-        let users: Vec<usize> = self.history.iter().enumerate().filter(|(_, m)| m.role == "user").map(|(i, _)| i).collect();
+        let users: Vec<usize> =
+            self.history.iter().enumerate().filter(|(_, m)| m.role == "user").map(|(i, _)| i).collect();
         let new_from = users.len().checked_sub(turns).map_or(0, |k| users[k]);
         let stretch = &self.history[new_from..];
         let asked: Vec<String> = stretch
@@ -763,7 +811,11 @@ impl Agent {
             .iter()
             .flat_map(|m| m.tool_calls.iter().flatten())
             .filter(|c| c.function.name == "skill_view")
-            .filter_map(|c| serde_json::from_str::<serde_json::Value>(&c.function.arguments).ok()?["name"].as_str().map(String::from))
+            .filter_map(|c| {
+                serde_json::from_str::<serde_json::Value>(&c.function.arguments).ok()?["name"]
+                    .as_str()
+                    .map(String::from)
+            })
             .collect::<Vec<_>>();
         let mut signals = learn::signals(&asked, calls, fails, rated, &skills_used);
         if signals.is_empty() {
@@ -812,7 +864,8 @@ impl Agent {
             signals.iter().map(|s| format!("- {s}")).collect::<Vec<_>>().join("\n"),
             tail(&transcript, 9000),
         );
-        let ctx = Ctx { home: &self.home, cfg: &self.cfg, session: &self.session.id, interactive: false, approver: None };
+        let ctx =
+            Ctx { home: &self.home, cfg: &self.cfg, session: &self.session.id, interactive: false, approver: None };
         let pass = learn::Pass::new(ctx, learn::PassKind::Review);
         if let Err(e) = run_pass(&self.bg, pass, REVIEW_SYSTEM, &prompt, 6) {
             eprintln!("pagurus: reflection skipped: {e}");
@@ -848,7 +901,12 @@ fn run_pass(llm: &Llm, mut pass: learn::Pass, system: &str, prompt: &str, rounds
         for c in calls {
             let out = pass.exec(&c.function.name, &c.function.arguments);
             if std::env::var_os("PAGURUS_DEBUG").is_some() {
-                eprintln!("    · {} {} → {}", c.function.name, one_line(&c.function.arguments, 200), one_line(&out, 200));
+                eprintln!(
+                    "    · {} {} → {}",
+                    c.function.name,
+                    one_line(&c.function.arguments, 200),
+                    one_line(&out, 200)
+                );
             }
             msgs.push(Msg::tool(&c.id, &out));
         }
@@ -1069,7 +1127,12 @@ fn run_sub_as(
     sub.set = Set::Sub;
     sub.detached = true;
     let intro = if intro.is_empty() { String::new() } else { format!("{intro}\n\n") };
-    sub.system = format!("{intro}{SUB_SYSTEM}\n\n{}\n- Now: {}. Workspace: {}/workspace.\n", about(&cfg, home), fmt_time(now()), home.display());
+    sub.system = format!(
+        "{intro}{SUB_SYSTEM}\n\n{}\n- Now: {}. Workspace: {}/workspace.\n",
+        about(&cfg, home),
+        fmt_time(now()),
+        home.display()
+    );
     eprintln!("  ↳ sub-agent ({}): {}", cfg.provider.model, one_line(task, 100));
     let report = sub.turn_with(task, approver)?;
     Ok((report, sub.history.iter().filter(|m| m.role == "tool").count()))
@@ -1164,9 +1227,24 @@ fn msg_chars(m: &Msg) -> usize {
 fn claims_sending(text: &str) -> bool {
     let t = text.to_lowercase();
     [
-        "sending it to you", "sending it now", "sending you", "sent you", "i've sent", "i have sent", "here it is attached",
-        "attached below", "i'm attaching", "i am attaching", "attached the", "sending the image", "sending the file",
-        "sending the pdf", "i'll send it now", "sent it to you", "sent the image", "sent the file",
+        "sending it to you",
+        "sending it now",
+        "sending you",
+        "sent you",
+        "i've sent",
+        "i have sent",
+        "here it is attached",
+        "attached below",
+        "i'm attaching",
+        "i am attaching",
+        "attached the",
+        "sending the image",
+        "sending the file",
+        "sending the pdf",
+        "i'll send it now",
+        "sent it to you",
+        "sent the image",
+        "sent the file",
     ]
     .iter()
     .any(|p| t.contains(p))
@@ -1184,7 +1262,12 @@ fn complete_tool_rounds(mut msgs: Vec<Msg>) -> Vec<Msg> {
             i += 1;
             continue;
         };
-        let answered = calls.iter().all(|c| msgs[i + 1..].iter().take_while(|m| m.role == "tool").any(|m| m.tool_call_id.as_deref() == Some(c.id.as_str())));
+        let answered = calls.iter().all(|c| {
+            msgs[i + 1..]
+                .iter()
+                .take_while(|m| m.role == "tool")
+                .any(|m| m.tool_call_id.as_deref() == Some(c.id.as_str()))
+        });
         if !answered {
             msgs.truncate(i);
             break;
@@ -1221,7 +1304,9 @@ fn about(cfg: &Config, home: &std::path::Path) -> String {
     let p = &cfg.provider;
     let host = |url: &str| url.split("://").nth(1).unwrap_or(url).split('/').next().unwrap_or(url).to_string();
     let mut fallbacks: Vec<String> = p.fallback_models.iter().map(|m| format!("{m} ({})", host(&p.base_url))).collect();
-    fallbacks.extend(p.fallback.iter().map(|f| format!("{} ({})", f.model, host(f.base_url.as_deref().unwrap_or(&p.base_url)))));
+    fallbacks.extend(
+        p.fallback.iter().map(|f| format!("{} ({})", f.model, host(f.base_url.as_deref().unwrap_or(&p.base_url)))),
+    );
     let machine = read(std::path::Path::new("/etc/hostname")).trim().to_string();
     let machine = if machine.is_empty() { "this machine".to_string() } else { format!("`{machine}`") };
     let user = std::env::var("USER").unwrap_or_else(|_| "the user's account".into());
@@ -1309,7 +1394,8 @@ fn abilities(cfg: &Config, home: &std::path::Path) -> String {
 
 /// uge: the crypto-art tool, and that it can show the model artwork.
 #[cfg(feature = "art")]
-const ART_FACT: &str = "- Crypto art: the `art` tool researches Tezos (objkt) and Ethereum (OpenSea) art read-only. Its action=look \
+const ART_FACT: &str =
+    "- Crypto art: the `art` tool researches Tezos (objkt) and Ethereum (OpenSea) art read-only. Its action=look \
     shows you a piece's image, so you can see and describe artwork yourself when your model has vision.\n";
 #[cfg(not(feature = "art"))]
 const ART_FACT: &str = "";
@@ -1342,8 +1428,7 @@ fn render(msgs: &[Msg], max: usize) -> String {
 /// that exited non-zero, or one killed by the timeout.
 fn failed(c: &str) -> bool {
     let end = c.trim_end();
-    c.starts_with("error:")
-        || (end.ends_with(']') && (end.contains("\n[exit ") || end.contains("\n[killed after ")))
+    c.starts_with("error:") || (end.ends_with(']') && (end.contains("\n[exit ") || end.contains("\n[killed after ")))
 }
 
 fn or_empty(s: &str) -> &str {
@@ -1448,7 +1533,10 @@ pub fn repl(home: PathBuf, cfg: Config) -> Result<(), String> {
         if line_owned == "/edit" {
             match compose(&home) {
                 Some(text) => {
-                    println!("{}", crate::ui::dim(&format!("(sending {} lines from the editor)", text.lines().count())));
+                    println!(
+                        "{}",
+                        crate::ui::dim(&format!("(sending {} lines from the editor)", text.lines().count()))
+                    );
                     line_owned = text;
                 }
                 None => continue,
@@ -1468,7 +1556,9 @@ pub fn repl(home: PathBuf, cfg: Config) -> Result<(), String> {
             "/project" => {
                 let arg = words.collect::<Vec<_>>().join(" ");
                 let msg = match arg.as_str() {
-                    "" => crate::code::current().map(|p| format!("Project: {} (/project off closes it)", p.root.display())).unwrap_or_else(|| "No project open. /project <folder> opens one.".into()),
+                    "" => crate::code::current()
+                        .map(|p| format!("Project: {} (/project off closes it)", p.root.display()))
+                        .unwrap_or_else(|| "No project open. /project <folder> opens one.".into()),
                     "off" | "close" => crate::code::close(),
                     path => crate::code::open(&home, path).unwrap_or_else(|e| format!("error: {e}")),
                 };
@@ -1525,7 +1615,10 @@ pub fn repl(home: PathBuf, cfg: Config) -> Result<(), String> {
                 let path = words.next().unwrap_or("");
                 let question = words.collect::<Vec<_>>().join(" ");
                 let question = if question.is_empty() { "What's in this image?".to_string() } else { question };
-                match std::fs::read(crate::util::expand(path)).map_err(|e| format!("{path}: {e}")).and_then(|b| crate::util::image_data_url(&b)) {
+                match std::fs::read(crate::util::expand(path))
+                    .map_err(|e| format!("{path}: {e}"))
+                    .and_then(|b| crate::util::image_data_url(&b))
+                {
                     Ok(url) => {
                         let t0 = now();
                         show_turn(&mut a, &question, vec![url], &mut last_answer, &mut session_tokens);
@@ -1535,11 +1628,17 @@ pub fn repl(home: PathBuf, cfg: Config) -> Result<(), String> {
                     Err(e) => eprintln!("{e}"),
                 }
             }
-            "/rollback" => println!("{}", crate::files::rollback(&home, &words.collect::<Vec<_>>().join(" ")).unwrap_or_else(|e| e)),
+            "/rollback" => println!(
+                "{}",
+                crate::files::rollback(&home, &words.collect::<Vec<_>>().join(" ")).unwrap_or_else(|e| e)
+            ),
             "/procs" => println!("{}", crate::procs::list()),
             "/yolo" => {
                 let arg = words.collect::<Vec<_>>().join(" ");
-                println!("{}", crate::autonomy::command(&arg, crate::autonomy::yolo_left(), &mut crate::autonomy::set_yolo));
+                println!(
+                    "{}",
+                    crate::autonomy::command(&arg, crate::autonomy::yolo_left(), &mut crate::autonomy::set_yolo)
+                );
             }
             "/audit" => println!("{}", crate::autonomy::report(&home, words.next() == Some("all"), 20)),
             "/pin" => println!("{}", a.pin(&words.collect::<Vec<_>>().join(" "))),
@@ -1555,7 +1654,11 @@ pub fn repl(home: PathBuf, cfg: Config) -> Result<(), String> {
                 let t0 = now();
                 show_turn(&mut a, line, vec![], &mut last_answer, &mut session_tokens);
                 for (p, caption) in tools::take_attachments() {
-                    println!("📎 {}{}", p.display(), if caption.is_empty() { String::new() } else { format!(" — {caption}") });
+                    println!(
+                        "📎 {}{}",
+                        p.display(),
+                        if caption.is_empty() { String::new() } else { format!(" — {caption}") }
+                    );
                 }
                 a.after_turn();
                 report(&home, t0);
@@ -1571,8 +1674,31 @@ pub fn repl(home: PathBuf, cfg: Config) -> Result<(), String> {
 }
 
 const REPL_COMMANDS: &[&str] = &[
-    "/help", "/new", "/status", "/model", "/tools", "/pin", "/pins", "/unpin", "/good", "/bad", "/undo", "/retry", "/copy",
-    "/edit", "/image", "/rollback", "/procs", "/yolo", "/audit", "/learn", "/review", "/clear", "/exit", "/project", "/revert",
+    "/help",
+    "/new",
+    "/status",
+    "/model",
+    "/tools",
+    "/pin",
+    "/pins",
+    "/unpin",
+    "/good",
+    "/bad",
+    "/undo",
+    "/retry",
+    "/copy",
+    "/edit",
+    "/image",
+    "/rollback",
+    "/procs",
+    "/yolo",
+    "/audit",
+    "/learn",
+    "/review",
+    "/clear",
+    "/exit",
+    "/project",
+    "/revert",
 ];
 
 const REPL_HELP: &str = "Conversation
@@ -1645,7 +1771,8 @@ fn compose(home: &std::path::Path) -> Option<String> {
     let _ = std::fs::write(&p, "");
     let editor = std::env::var("VISUAL").or_else(|_| std::env::var("EDITOR")).unwrap_or_else(|_| "vi".into());
     let mut parts = editor.split_whitespace();
-    let ok = std::process::Command::new(parts.next()?).args(parts).arg(&p).status().map(|s| s.success()).unwrap_or(false);
+    let ok =
+        std::process::Command::new(parts.next()?).args(parts).arg(&p).status().map(|s| s.success()).unwrap_or(false);
     let text = read(&p).trim().to_string();
     let _ = std::fs::remove_file(&p);
     if !ok || text.is_empty() {
@@ -1660,7 +1787,8 @@ fn copy(text: &str) -> String {
     if text.trim().is_empty() {
         return "Nothing to copy yet.".into();
     }
-    let tools: &[&[&str]] = &[&["pbcopy"], &["wl-copy"], &["xclip", "-selection", "clipboard"], &["xsel", "--clipboard", "--input"]];
+    let tools: &[&[&str]] =
+        &[&["pbcopy"], &["wl-copy"], &["xclip", "-selection", "clipboard"], &["xsel", "--clipboard", "--input"]];
     for t in tools {
         let child = std::process::Command::new(t[0]).args(&t[1..]).stdin(std::process::Stdio::piped()).spawn();
         if let Ok(mut c) = child {
@@ -1700,7 +1828,11 @@ pub(crate) mod tests {
         let mut cfg = crate::config::Config::default();
         let a = super::about(&cfg, &home);
         assert!(a.contains("Voice: off here") && a.contains("sets [voice] stt_url"));
-        assert!(a.contains("Swarm: you can pair") && a.contains("no peers paired yet") && a.contains("does not accept tasks"));
+        assert!(
+            a.contains("Swarm: you can pair")
+                && a.contains("no peers paired yet")
+                && a.contains("does not accept tasks")
+        );
         assert!(a.contains("never estimate or invent one"));
         cfg.voice.stt_url = "http://127.0.0.1:9000/v1".into();
         cfg.peer.listen = "127.0.0.1:7717".into();
@@ -1796,7 +1928,9 @@ pub(crate) mod tests {
         a.history.push(Msg::user_with_images("and this", vec!["data:image/png;base64,BBBB".into()]));
         a.history.push(Msg::assistant("a shell"));
         a.forget_old_images();
-        assert!(a.history[0].images.is_empty() && a.history[0].content.as_deref().unwrap().contains("no longer attached"));
+        assert!(
+            a.history[0].images.is_empty() && a.history[0].content.as_deref().unwrap().contains("no longer attached")
+        );
         assert_eq!(a.history[2].images.len(), 1, "the last exchange keeps its image");
     }
 
@@ -1809,14 +1943,23 @@ pub(crate) mod tests {
         a.push(Msg::user("is the dashboard up?"));
         a.push(Msg::assistant("yes, home-dashboard is running"));
         a.push(Msg::user("restart home-dashboard"));
-        let call = crate::llm::ToolCall { id: "c9".into(), kind: "function".into(), function: crate::llm::FnCall { name: "shell".into(), arguments: "{}".into() }, extra: Default::default() };
+        let call = crate::llm::ToolCall {
+            id: "c9".into(),
+            kind: "function".into(),
+            function: crate::llm::FnCall { name: "shell".into(), arguments: "{}".into() },
+            extra: Default::default(),
+        };
         a.push(Msg { role: "assistant".into(), tool_calls: Some(vec![call]), ..Default::default() }); // pagurus stopped here
         let id = a.session.id.clone();
         drop(a);
         let mut b = super::Agent::resume(home.clone(), cfg.clone(), "tg", &id).unwrap();
         assert_eq!(b.session.id, id, "same transcript");
         let texts: Vec<String> = b.history.iter().map(|m| m.content.clone().unwrap_or_default()).collect();
-        assert_eq!(texts, ["is the dashboard up?", "yes, home-dashboard is running", "restart home-dashboard"], "the unanswered tool call is dropped");
+        assert_eq!(
+            texts,
+            ["is the dashboard up?", "yes, home-dashboard is running", "restart home-dashboard"],
+            "the unanswered tool call is dropped"
+        );
         b.push(Msg::assistant("done"));
         assert_eq!(b.session.messages().len(), 5, "new messages go to the same file");
         let fresh = super::Agent::resume(home.clone(), cfg, "tg", "no-such-session").unwrap();
@@ -1955,7 +2098,8 @@ pub(crate) mod tests {
         let t = std::time::Instant::now();
         assert_eq!(a.turn("wait three times").unwrap(), "done");
         assert!(t.elapsed().as_secs_f32() < 2.5, "ran one after another: {:?}", t.elapsed());
-        let ids: Vec<String> = a.history.iter().filter(|m| m.role == "tool").filter_map(|m| m.tool_call_id.clone()).collect();
+        let ids: Vec<String> =
+            a.history.iter().filter(|m| m.role == "tool").filter_map(|m| m.tool_call_id.clone()).collect();
         assert_eq!(ids, ["a", "b", "c"], "results keep the model's order");
     }
 
@@ -2005,7 +2149,8 @@ pub(crate) mod tests {
             match (sub, tool_out) {
                 (true, None) => call("shell", r#"{"command":"sleep 1 && echo ok"}"#),
                 (true, Some(_)) => {
-                    let task = msgs.iter().find(|m| m["role"] == "user").and_then(|m| m["content"].as_str()).unwrap_or("");
+                    let task =
+                        msgs.iter().find(|m| m["role"] == "user").and_then(|m| m["content"].as_str()).unwrap_or("");
                     serde_json::json!({"role":"assistant","content": format!("finished {task}")})
                 }
                 (false, None) => call("delegate", r#"{"tasks":["job-a","job-b","job-c"]}"#),

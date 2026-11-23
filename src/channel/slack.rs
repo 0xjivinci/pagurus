@@ -54,9 +54,12 @@ pub struct Slack {
 
 impl Slack {
     pub fn new(c: &SlackCfg) -> Result<Self, String> {
-        let get = |n: &str| std::env::var(n).map(|v| v.trim().to_string()).map_err(|_| format!("slack enabled but ${n} is not set"));
+        let get = |n: &str| {
+            std::env::var(n).map(|v| v.trim().to_string()).map_err(|_| format!("slack enabled but ${n} is not set"))
+        };
         let (bot, app) = (get(&c.bot_token_env)?, get(&c.app_token_env)?);
-        let allowed: Vec<String> = c.allowed_user_ids.iter().map(|u| u.trim().to_string()).filter(|u| !u.is_empty()).collect();
+        let allowed: Vec<String> =
+            c.allowed_user_ids.iter().map(|u| u.trim().to_string()).filter(|u| !u.is_empty()).collect();
         if allowed.is_empty() {
             return Err("slack.allowed_user_ids is empty — refusing to answer strangers".into());
         }
@@ -270,7 +273,12 @@ impl Channel for Slack {
         if !url.starts_with("https://files.slack.com/") {
             return Err("not a Slack file".into()); // the bot token goes only to Slack
         }
-        let r = self.http.get(url).set("Authorization", &format!("Bearer {}", self.bot)).call().map_err(|e| self.redact(e))?;
+        let r = self
+            .http
+            .get(url)
+            .set("Authorization", &format!("Bearer {}", self.bot))
+            .call()
+            .map_err(|e| self.redact(e))?;
         super::read_body(r, crate::util::MAX_IMAGE_BYTES)
     }
 
@@ -292,9 +300,11 @@ mod tests {
         let mut stranger = dm.clone();
         stranger["user"] = json!("U2");
         assert!(parse_event(&stranger, "UBOT", &allowed).is_none());
-        let channel_msg = json!({ "type": "message", "channel_type": "channel", "user": "U1", "channel": "C1", "text": "hi" });
+        let channel_msg =
+            json!({ "type": "message", "channel_type": "channel", "user": "U1", "channel": "C1", "text": "hi" });
         assert!(parse_event(&channel_msg, "UBOT", &allowed).is_none(), "channel chatter needs a mention");
-        let mention = json!({ "type": "app_mention", "user": "U1", "channel": "C1", "text": "<@UBOT> /yes", "ts": "2" });
+        let mention =
+            json!({ "type": "app_mention", "user": "U1", "channel": "C1", "text": "<@UBOT> /yes", "ts": "2" });
         assert_eq!(parse_event(&mention, "UBOT", &allowed).unwrap().0 .1, "/yes");
         let mut bot = dm.clone();
         bot["bot_id"] = json!("B1");
@@ -312,7 +322,11 @@ mod tests {
     fn refuses_to_start_without_an_allowlist() {
         std::env::set_var("PAGURUS_TEST_SL_BOT_TOKEN", "xoxb-1");
         std::env::set_var("PAGURUS_TEST_SL_APP_TOKEN", "xapp-1");
-        let c = SlackCfg { bot_token_env: "PAGURUS_TEST_SL_BOT_TOKEN".into(), app_token_env: "PAGURUS_TEST_SL_APP_TOKEN".into(), allowed_user_ids: vec![" ".into()] };
+        let c = SlackCfg {
+            bot_token_env: "PAGURUS_TEST_SL_BOT_TOKEN".into(),
+            app_token_env: "PAGURUS_TEST_SL_APP_TOKEN".into(),
+            allowed_user_ids: vec![" ".into()],
+        };
         assert!(Slack::new(&c).is_err());
         let s = Slack::new(&SlackCfg { allowed_user_ids: vec!["U1".into()], ..c }).unwrap();
         assert!(s.fetch("https://evil.example/x").is_err(), "the token goes only to Slack");

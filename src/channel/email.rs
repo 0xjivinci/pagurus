@@ -109,7 +109,9 @@ impl<S: Read + Write> Imap<S> {
         loop {
             let mut line = read_line(&mut self.s, 64 * 1024).map_err(|e| format!("imap: {e}"))?;
             // a line ending in {n} is followed by n bytes of data, then the rest of the line
-            while let Some(n) = line.strip_suffix('}').and_then(|l| l.rsplit_once('{')).and_then(|(_, n)| n.parse::<usize>().ok()) {
+            while let Some(n) =
+                line.strip_suffix('}').and_then(|l| l.rsplit_once('{')).and_then(|(_, n)| n.parse::<usize>().ok())
+            {
                 if n > MAX_MAIL + 1024 {
                     return Err("imap: literal too large".into());
                 }
@@ -130,7 +132,9 @@ impl<S: Read + Write> Imap<S> {
     }
 
     pub fn login(&mut self, user: &str, pass: &str) -> Result<(), String> {
-        self.cmd(&format!("LOGIN {} {}", quote(user)?, quote(pass)?)).map(|_| ()).map_err(|_| "imap: login failed (username / password?)".to_string())
+        self.cmd(&format!("LOGIN {} {}", quote(user)?, quote(pass)?))
+            .map(|_| ())
+            .map_err(|_| "imap: login failed (username / password?)".to_string())
     }
 
     /// UIDs of unseen mail since `since` from any of `senders`.
@@ -143,7 +147,11 @@ impl<S: Read + Write> Imap<S> {
             from.push_str(&format!("FROM {} ", quote(s)?));
         }
         let r = self.cmd(&format!("UID SEARCH UNSEEN SINCE {since} {}", from.trim_end()))?;
-        Ok(r.lines.iter().filter_map(|l| l.strip_prefix("* SEARCH")).flat_map(|l| l.split_whitespace().filter_map(|n| n.parse().ok())).collect())
+        Ok(r.lines
+            .iter()
+            .filter_map(|l| l.strip_prefix("* SEARCH"))
+            .flat_map(|l| l.split_whitespace().filter_map(|n| n.parse().ok()))
+            .collect())
     }
 
     /// The start of a message, without marking it seen.
@@ -173,7 +181,11 @@ pub struct Mail {
 }
 
 fn split_head(raw: &[u8]) -> (String, &[u8]) {
-    let at = raw.windows(4).position(|w| w == b"\r\n\r\n").map(|i| (i, 4)).or_else(|| raw.windows(2).position(|w| w == b"\n\n").map(|i| (i, 2)));
+    let at = raw
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .map(|i| (i, 4))
+        .or_else(|| raw.windows(2).position(|w| w == b"\n\n").map(|i| (i, 2)));
     match at {
         Some((i, n)) => (String::from_utf8_lossy(&raw[..i]).into_owned(), &raw[i + n..]),
         None => (String::from_utf8_lossy(raw).into_owned(), &[]),
@@ -211,11 +223,13 @@ pub fn address(s: &str) -> String {
 
 /// A header parameter, e.g. boundary or charset.
 fn param(v: &str, name: &str) -> String {
-    v.split(';').skip(1).find_map(|p| {
-        let (k, val) = p.split_once('=')?;
-        (k.trim().eq_ignore_ascii_case(name)).then(|| val.trim().trim_matches('"').to_string())
-    })
-    .unwrap_or_default()
+    v.split(';')
+        .skip(1)
+        .find_map(|p| {
+            let (k, val) = p.split_once('=')?;
+            (k.trim().eq_ignore_ascii_case(name)).then(|| val.trim().trim_matches('"').to_string())
+        })
+        .unwrap_or_default()
 }
 
 fn unbase64(s: &[u8]) -> Vec<u8> {
@@ -268,7 +282,10 @@ fn unqp(s: &[u8], header: bool) -> Vec<u8> {
 }
 
 fn decode_charset(b: &[u8], charset: &str) -> String {
-    if charset.eq_ignore_ascii_case("iso-8859-1") || charset.eq_ignore_ascii_case("latin1") || charset.eq_ignore_ascii_case("us-ascii") {
+    if charset.eq_ignore_ascii_case("iso-8859-1")
+        || charset.eq_ignore_ascii_case("latin1")
+        || charset.eq_ignore_ascii_case("us-ascii")
+    {
         return b.iter().map(|c| *c as char).collect();
     }
     String::from_utf8_lossy(b).into_owned()
@@ -318,7 +335,9 @@ fn plain_text(head: &[(String, String)], body: &[u8], depth: u8) -> Option<Strin
         }
         return None;
     }
-    if !(mime.is_empty() || mime == "text/plain") || get(head, "content-disposition").to_lowercase().starts_with("attachment") {
+    if !(mime.is_empty() || mime == "text/plain")
+        || get(head, "content-disposition").to_lowercase().starts_with("attachment")
+    {
         return None;
     }
     let raw = match get(head, "content-transfer-encoding").to_lowercase().as_str() {
@@ -335,7 +354,12 @@ fn strip_quotes(t: &str) -> String {
     for line in t.lines() {
         let l = line.trim();
         let wrote = l.starts_with("On ") && l.ends_with("wrote:");
-        if wrote || l == "-- " || line == "-- " || l.starts_with("-----Original Message-----") || l.starts_with("________________________________") {
+        if wrote
+            || l == "-- "
+            || line == "-- "
+            || l.starts_with("-----Original Message-----")
+            || l.starts_with("________________________________")
+        {
             break;
         }
         if !l.starts_with('>') {
@@ -369,11 +393,16 @@ pub fn parse_mail(raw: &[u8]) -> Mail {
         ar.split(';').any(|c| {
             let c = c.trim();
             c.starts_with(&format!("{method}=pass"))
-                && c.split_whitespace().any(|w| w.strip_prefix(key).is_some_and(|v| v.trim_matches(['"', ')']).rsplit('@').next() == Some(domain.as_str())))
+                && c.split_whitespace().any(|w| {
+                    w.strip_prefix(key)
+                        .is_some_and(|v| v.trim_matches(['"', ')']).rsplit('@').next() == Some(domain.as_str()))
+                })
         })
     };
     let authentic = !domain.is_empty()
-        && (ar.split(';').any(|c| c.trim().starts_with("dmarc=pass")) || aligned("dkim", "header.d=") || aligned("spf", "smtp.mailfrom="));
+        && (ar.split(';').any(|c| c.trim().starts_with("dmarc=pass"))
+            || aligned("dkim", "header.d=")
+            || aligned("spf", "smtp.mailfrom="));
     Mail {
         subject: decode_words(get(&h, "subject")).replace(['\r', '\n'], " "),
         message_id: get(&h, "message-id").to_string(),
@@ -400,7 +429,10 @@ fn smtp_reply<S: Read>(s: &mut S) -> Result<(u16, String), String> {
             line.push(b[0]);
         }
         let l = String::from_utf8_lossy(&line).trim_end().to_string();
-        let code = l.get(..3).and_then(|c| c.parse().ok()).ok_or_else(|| format!("smtp: bad reply {}", crate::util::one_line(&l, 80)))?;
+        let code = l
+            .get(..3)
+            .and_then(|c| c.parse().ok())
+            .ok_or_else(|| format!("smtp: bad reply {}", crate::util::one_line(&l, 80)))?;
         text.push_str(l.get(4..).unwrap_or(""));
         text.push('\n');
         if l.as_bytes().get(3) != Some(&b'-') {
@@ -414,7 +446,11 @@ fn smtp_cmd<S: Read + Write>(s: &mut S, c: &str, want: u16) -> Result<String, St
     let (code, text) = smtp_reply(s)?;
     if code / 100 != want / 100 {
         // AUTH lines carry credentials: never echo the command
-        let what = c.split_whitespace().next().filter(|w| ["EHLO", "STARTTLS", "AUTH", "MAIL", "RCPT", "DATA", "QUIT"].contains(w)).unwrap_or("step");
+        let what = c
+            .split_whitespace()
+            .next()
+            .filter(|w| ["EHLO", "STARTTLS", "AUTH", "MAIL", "RCPT", "DATA", "QUIT"].contains(w))
+            .unwrap_or("step");
         return Err(format!("smtp {what}: {code} {}", crate::util::one_line(&text, 160)));
     }
     Ok(text)
@@ -458,7 +494,9 @@ pub fn smtp_send<S: Read + Write>(s: &mut S, env: &Envelope, data: &str) -> Resu
 }
 
 fn valid_address(a: &str) -> bool {
-    a.len() <= 254 && a.matches('@').count() == 1 && !a.contains(|c: char| c.is_whitespace() || c.is_control() || "<>,;\"".contains(c))
+    a.len() <= 254
+        && a.matches('@').count() == 1
+        && !a.contains(|c: char| c.is_whitespace() || c.is_control() || "<>,;\"".contains(c))
 }
 
 /// RFC 5322 date, UTC.
@@ -468,7 +506,14 @@ fn date(t: u64) -> String {
     const WD: [&str; 7] = ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"];
     const MO: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     let s = t % 86_400;
-    format!("{}, {d:02} {} {y} {:02}:{:02}:{:02} +0000", WD[(days % 7) as usize], MO[m as usize - 1], s / 3600, s / 60 % 60, s % 60)
+    format!(
+        "{}, {d:02} {} {y} {:02}:{:02}:{:02} +0000",
+        WD[(days % 7) as usize],
+        MO[m as usize - 1],
+        s / 3600,
+        s / 60 % 60,
+        s % 60
+    )
 }
 
 /// IMAP SEARCH date: 17-Nov-2026.
@@ -493,7 +538,8 @@ fn compose(from: &str, to: &str, th: &Thread, text: &str, t: u64) -> String {
         s if s.to_lowercase().starts_with("re:") => clean(s),
         s => format!("Re: {}", clean(s)),
     };
-    let subject = if subject.is_ascii() { subject } else { format!("=?UTF-8?B?{}?=", crate::util::base64(subject.as_bytes())) };
+    let subject =
+        if subject.is_ascii() { subject } else { format!("=?UTF-8?B?{}?=", crate::util::base64(subject.as_bytes())) };
     let domain = from.rsplit('@').next().unwrap_or("pagurus.local");
     let mut m = format!(
         "From: {from}\r\nTo: {to}\r\nSubject: {subject}\r\nDate: {}\r\nMessage-ID: <{:016x}.pagurus@{domain}>\r\n",
@@ -528,7 +574,8 @@ pub struct Email {
 
 impl Email {
     pub fn new(c: &EmailCfg) -> Result<Self, String> {
-        let pass = std::env::var(&c.password_env).map_err(|_| format!("email enabled but ${} is not set", c.password_env))?;
+        let pass =
+            std::env::var(&c.password_env).map_err(|_| format!("email enabled but ${} is not set", c.password_env))?;
         let allowed: Vec<String> = c.allowed_senders.iter().map(|a| address(a)).filter(|a| valid_address(a)).collect();
         if allowed.is_empty() {
             return Err("email.allowed_senders is empty — refusing to read or answer anyone".into());
@@ -586,7 +633,10 @@ impl Email {
             imap.seen(uid)?;
             let text = if mail.text.is_empty() { mail.subject.clone() } else { mail.text.clone() };
             if let Ok(mut t) = self.threads.lock() {
-                t.insert(mail.from.clone(), Thread { subject: mail.subject, message_id: mail.message_id, references: mail.references });
+                t.insert(
+                    mail.from.clone(),
+                    Thread { subject: mail.subject, message_id: mail.message_id, references: mail.references },
+                );
             }
             out.push((mail.from, super::clip_in(&text), None));
         }
@@ -663,7 +713,10 @@ mod tests {
 
     /// A scripted server on 127.0.0.1: for each line it reads, the reply
     /// whose key the line starts with. Returns its address and what it read.
-    fn fake(greeting: &'static str, script: Vec<(&'static str, String)>) -> (u16, std::thread::JoinHandle<Vec<String>>) {
+    fn fake(
+        greeting: &'static str,
+        script: Vec<(&'static str, String)>,
+    ) -> (u16, std::thread::JoinHandle<Vec<String>>) {
         let l = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = l.local_addr().unwrap().port();
         let h = std::thread::spawn(move || {
@@ -687,7 +740,11 @@ mod tests {
                     }
                     continue;
                 }
-                let key = line.split_whitespace().nth(if greeting.starts_with("* ") { 1 } else { 0 }).unwrap_or("").to_string();
+                let key = line
+                    .split_whitespace()
+                    .nth(if greeting.starts_with("* ") { 1 } else { 0 })
+                    .unwrap_or("")
+                    .to_string();
                 let Some((_, reply)) = script.iter().find(|(k, _)| line.contains(k) || key == *k) else {
                     w.write_all(b"500 unexpected\r\n").unwrap();
                     continue;
@@ -773,7 +830,12 @@ mod tests {
     fn smtp_auth_login_and_rejection() {
         let (port, h) = fake(
             "220 fake\r\n",
-            vec![("EHLO", "250-fake\r\n250 AUTH LOGIN\r\n".into()), ("AUTH LOGIN", "334 VXNlcm5hbWU6\r\n".into()), ("bWU=", "334 UGFzc3dvcmQ6\r\n".into()), ("cHc=", "535 bad credentials\r\n".into())],
+            vec![
+                ("EHLO", "250-fake\r\n250 AUTH LOGIN\r\n".into()),
+                ("AUTH LOGIN", "334 VXNlcm5hbWU6\r\n".into()),
+                ("bWU=", "334 UGFzc3dvcmQ6\r\n".into()),
+                ("cHc=", "535 bad credentials\r\n".into()),
+            ],
         );
         let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
         greet(&mut s).unwrap();
@@ -806,7 +868,9 @@ Is the disk f=C3=BCll?\r\n\r\nOn Mon, Nov 16, 2026 pagurus wrote:\r\n> old\r\n--
         let spoof = parse_mail(b"Authentication-Results: mx; spf=pass smtp.mailfrom=a@evil.example; dkim=pass header.d=evil.example; dmarc=fail\r\nFrom: me@x.org\r\n\r\n/yes");
         assert!(!spoof.authentic);
         assert!(!parse_mail(b"From: me@x.org\r\n\r\nno auth header").authentic);
-        let b64 = parse_mail(b"From: me@x.org\r\nContent-Type: text/plain\r\nContent-Transfer-Encoding: base64\r\n\r\naGVs\r\nbG8=\r\n");
+        let b64 = parse_mail(
+            b"From: me@x.org\r\nContent-Type: text/plain\r\nContent-Transfer-Encoding: base64\r\n\r\naGVs\r\nbG8=\r\n",
+        );
         assert_eq!(b64.text, "hello");
     }
 
@@ -828,7 +892,13 @@ Is the disk f=C3=BCll?\r\n\r\nOn Mon, Nov 16, 2026 pagurus wrote:\r\n> old\r\n--
     #[test]
     fn never_mails_strangers() {
         std::env::set_var("PAGURUS_TEST_MAIL_PW", "pw");
-        let mut c = EmailCfg { imap_host: "i".into(), smtp_host: "s".into(), username: "h@x.org".into(), password_env: "PAGURUS_TEST_MAIL_PW".into(), ..Default::default() };
+        let mut c = EmailCfg {
+            imap_host: "i".into(),
+            smtp_host: "s".into(),
+            username: "h@x.org".into(),
+            password_env: "PAGURUS_TEST_MAIL_PW".into(),
+            ..Default::default()
+        };
         assert!(Email::new(&c).is_err(), "empty allowlist");
         c.allowed_senders = vec!["Me <ME@x.org>".into()];
         let e = Email::new(&c).unwrap();

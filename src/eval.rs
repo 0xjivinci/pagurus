@@ -165,14 +165,22 @@ pub fn run(home: &Path, args: &[String]) -> Result<(), String> {
             }
             Ok(f) => {
                 let mark = if c.soft { "~" } else { "✗" };
-                if c.soft { soft_missed += 1 } else { failed += 1 }
+                if c.soft {
+                    soft_missed += 1
+                } else {
+                    failed += 1
+                }
                 println!("  {mark} {:<28} {secs:>3}s  {}", c.name, f.join("; "));
                 if !c.why.is_empty() {
                     println!("      ({})", c.why);
                 }
             }
             Err(e) => {
-                if c.soft { soft_missed += 1 } else { failed += 1 }
+                if c.soft {
+                    soft_missed += 1
+                } else {
+                    failed += 1
+                }
                 println!("  ! {:<28} {secs:>3}s  error: {}", c.name, crate::util::one_line(&e, 160));
             }
         }

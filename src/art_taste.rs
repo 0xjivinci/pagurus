@@ -28,7 +28,13 @@ pub struct ArtCfg {
 
 impl Default for ArtCfg {
     fn default() -> Self {
-        Self { wallets: vec![], weekly_budget_xtz: 0.0, weekly_budget_eth: 0.0, picks_per_week: 5, dashboard: "127.0.0.1:7720".into() }
+        Self {
+            wallets: vec![],
+            weekly_budget_xtz: 0.0,
+            weekly_budget_eth: 0.0,
+            picks_per_week: 5,
+            dashboard: "127.0.0.1:7720".into(),
+        }
     }
 }
 
@@ -44,7 +50,8 @@ fn lines(p: &Path) -> Vec<Value> {
 
 fn append(p: &Path, v: &Value) -> Result<(), String> {
     let _ = std::fs::create_dir_all(p.parent().unwrap_or(Path::new(".")));
-    let mut f = std::fs::OpenOptions::new().create(true).append(true).open(p).map_err(|e| format!("{}: {e}", p.display()))?;
+    let mut f =
+        std::fs::OpenOptions::new().create(true).append(true).open(p).map_err(|e| format!("{}: {e}", p.display()))?;
     writeln!(f, "{v}").map_err(|e| e.to_string())
 }
 
@@ -65,7 +72,8 @@ pub fn meta(home: &Path, spec: &str) -> Result<Value, String> {
     if crate::art_eth::looks_eth(spec) {
         return crate::art_eth::meta(home, spec);
     }
-    let (c, id) = crate::art::parse_piece(spec).ok_or("give the piece as an objkt link or KT1…/id (or an OpenSea link)")?;
+    let (c, id) =
+        crate::art::parse_piece(spec).ok_or("give the piece as an objkt link or KT1…/id (or an OpenSea link)")?;
     let q = "query($c: String!, $t: String!) { token(where: {fa_contract: {_eq: $c}, token_id: {_eq: $t}}) { name supply lowest_ask \
              display_uri thumbnail_uri mime tags { tag { name } } creators { creator_address holder { alias tzdomain } } } }";
     let d = crate::art::gql(q, json!({ "c": c, "t": id }))?;
@@ -110,7 +118,10 @@ pub fn rate(home: &Path, spec: &str, verdict: &str, why: &str) -> Result<String,
         _ => return Err("verdict must be love, like or pass".into()),
     };
     let m = meta(home, spec)?;
-    append(&dir(home).join("ratings.jsonl"), &json!({ "t": now(), "verdict": v, "why": one_line(why, 300), "meta": m }))?;
+    append(
+        &dir(home).join("ratings.jsonl"),
+        &json!({ "t": now(), "verdict": v, "why": one_line(why, 300), "meta": m }),
+    )?;
     mark_proposal(home, m["piece"].as_str().unwrap_or(""), if v == "pass" { "passed" } else { "liked" });
     Ok(format!(
         "Noted: {} — {v}{}. {} rating(s) so far; call art action=taste to see the profile, and update it with note= when this changes the picture.",
@@ -164,25 +175,43 @@ pub fn taste(home: &Path, note: Option<&str>) -> Result<String, String> {
     let ratings = lines(&dir(home).join("ratings.jsonl"));
     let mut out = String::from("# Taste profile (art/taste.md)\n");
     let written = read(&p);
-    out += if written.trim().is_empty() { "(not written yet: after a few ratings, summarise them with action=taste note=…)\n" } else { &written };
+    out += if written.trim().is_empty() {
+        "(not written yet: after a few ratings, summarise them with action=taste note=…)\n"
+    } else {
+        &written
+    };
     let (artists, tags) = tallies(&ratings);
     let top = |v: &[(String, i32)], good: bool| {
-        v.iter().filter(|(_, s)| if good { *s > 0 } else { *s < 0 }).take(8).map(|(n, s)| format!("{n} ({s:+})")).collect::<Vec<_>>().join(", ")
+        v.iter()
+            .filter(|(_, s)| if good { *s > 0 } else { *s < 0 })
+            .take(8)
+            .map(|(n, s)| format!("{n} ({s:+})"))
+            .collect::<Vec<_>>()
+            .join(", ")
     };
     out += &format!("\n# Evidence: {} rating(s)\n", ratings.len());
     out += &format!("Artists they like: {}\nArtists they pass on: {}\n", top(&artists, true), top(&artists, false));
     out += &format!("Tags they like: {}\nTags they pass on: {}\n", top(&tags, true), top(&tags, false));
     for r in ratings.iter().rev().take(12) {
-        out += &format!("- {} {}{}\n", r["verdict"].as_str().unwrap_or(""), label(&r["meta"]), match r["why"].as_str() {
-            Some(w) if !w.is_empty() => format!(": {w}"),
-            _ => String::new(),
-        });
+        out += &format!(
+            "- {} {}{}\n",
+            r["verdict"].as_str().unwrap_or(""),
+            label(&r["meta"]),
+            match r["why"].as_str() {
+                Some(w) if !w.is_empty() => format!(": {w}"),
+                _ => String::new(),
+            }
+        );
     }
     let cfg = crate::config::load(home).map(|c| c.art).unwrap_or_default();
     if cfg.wallets.is_empty() {
-        out += "\nNo wallets set ([art] wallets in config.toml), so their own collection isn't part of the picture yet.\n";
+        out +=
+            "\nNo wallets set ([art] wallets in config.toml), so their own collection isn't part of the picture yet.\n";
     } else {
-        out += &format!("\nTheir collection (what they actually bought) is evidence too: art action=holdings who={}\n", cfg.wallets.join(" / "));
+        out += &format!(
+            "\nTheir collection (what they actually bought) is evidence too: art action=holdings who={}\n",
+            cfg.wallets.join(" / ")
+        );
     }
     Ok(out)
 }
@@ -227,10 +256,16 @@ pub fn wishlist(home: &Path) -> String {
     }
     let mut out = format!("Wishlist ({}):\n", items.len());
     for i in &items {
-        out += &format!("- {} · {} · {}{}\n", label(&i["meta"]), price(&i["meta"]), i["meta"]["url"].as_str().unwrap_or(""), match i["note"].as_str() {
-            Some(n) if !n.is_empty() => format!(" · {n}"),
-            _ => String::new(),
-        });
+        out += &format!(
+            "- {} · {} · {}{}\n",
+            label(&i["meta"]),
+            price(&i["meta"]),
+            i["meta"]["url"].as_str().unwrap_or(""),
+            match i["note"].as_str() {
+                Some(n) if !n.is_empty() => format!(" · {n}"),
+                _ => String::new(),
+            }
+        );
     }
     out
 }
@@ -254,10 +289,15 @@ pub fn propose(home: &Path, spec: &str, why: &str, fit: Option<u64>) -> Result<S
         return Ok(format!("{} is already proposed this week.", label(&m)));
     }
     let cfg = crate::config::load(home).map(|c| c.art).unwrap_or_default();
-    let (budget, cur) = if m["chain"] == "ethereum" { (cfg.weekly_budget_eth, "ETH") } else { (cfg.weekly_budget_xtz, "tez") };
+    let (budget, cur) =
+        if m["chain"] == "ethereum" { (cfg.weekly_budget_eth, "ETH") } else { (cfg.weekly_budget_xtz, "tez") };
     let p = m["price"].as_f64();
     if budget > 0.0 {
-        let proposed: f64 = current.iter().filter(|x| x["meta"]["currency"].as_str() == m["currency"].as_str()).filter_map(|x| x["meta"]["price"].as_f64()).sum();
+        let proposed: f64 = current
+            .iter()
+            .filter(|x| x["meta"]["currency"].as_str() == m["currency"].as_str())
+            .filter_map(|x| x["meta"]["price"].as_f64())
+            .sum();
         let spent = spent_this_week(home, &cfg).ok().map(|s| if cur == "ETH" { s.1 } else { s.0 }).unwrap_or(0.0);
         if p.is_some_and(|p| p + spent > budget) {
             return Err(format!(
@@ -270,7 +310,10 @@ pub fn propose(home: &Path, spec: &str, why: &str, fit: Option<u64>) -> Result<S
         let _ = proposed; // several picks are alternatives, so only each one alone must fit
     }
     let fit = fit.unwrap_or(3).clamp(1, 5);
-    append(&dir(home).join("proposals.jsonl"), &json!({ "t": now(), "week": week, "why": one_line(why, 400), "fit": fit, "status": "proposed", "meta": m }))?;
+    append(
+        &dir(home).join("proposals.jsonl"),
+        &json!({ "t": now(), "week": week, "why": one_line(why, 400), "fit": fit, "status": "proposed", "meta": m }),
+    )?;
     Ok(format!(
         "Proposed {} ({}, fit {fit}/5). {} pick(s) this week (aim for {}). Not bought: the user decides.",
         label(&m),
@@ -312,7 +355,13 @@ pub fn spent_this_week(home: &Path, cfg: &ArtCfg) -> Result<(f64, f64), String> 
             crate::art::SALE_FIELDS
         );
         let d = crate::art::gql(&q, json!({ "a": tz, "s": since }))?;
-        xtz = d["event"].as_array().into_iter().flatten().map(|e| crate::art::sale(e)["price_xtz"].as_i64().unwrap_or(0) as f64 / 1e6).sum::<f64>() + 0.0;
+        xtz = d["event"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|e| crate::art::sale(e)["price_xtz"].as_i64().unwrap_or(0) as f64 / 1e6)
+            .sum::<f64>()
+            + 0.0;
     }
     let mut eth = 0.0;
     for w in cfg.wallets.iter().filter(|w| crate::art_eth::is_address(w)) {
@@ -366,9 +415,13 @@ pub fn weekly(home: &Path, day: Option<&str>, at: Option<&str>) -> Result<String
     if crate::tasks::list(home).iter().any(|t| t.text.contains("weekly art proposals")) {
         return Ok("The weekly proposal round is already scheduled (see /tasks).".into());
     }
-    let weekday = crate::tasks::parse_weekday(day.filter(|d| !d.trim().is_empty()).unwrap_or("sun")).ok_or("unknown weekday")?;
+    let weekday =
+        crate::tasks::parse_weekday(day.filter(|d| !d.trim().is_empty()).unwrap_or("sun")).ok_or("unknown weekday")?;
     let hm = at.filter(|t| !t.trim().is_empty()).unwrap_or("10:00");
-    let minute = crate::tasks::parse_line(&format!("- [daily {hm}] x")).and_then(|t| t.cal).ok_or("use HH:MM for the time")?.minute;
+    let minute = crate::tasks::parse_line(&format!("- [daily {hm}] x"))
+        .and_then(|t| t.cal)
+        .ok_or("use HH:MM for the time")?
+        .minute;
     crate::tasks::add(
         home,
         "weekly art proposals: follow the art-taste skill's \"Weekly proposals\" steps and message the user the shortlist",
@@ -439,7 +492,8 @@ mod tests {
     #[test]
     fn taste_tallies_weigh_love_over_pass() {
         let r = |v: &str, a: &str, tags: &[&str]| json!({ "verdict": v, "meta": { "artist_name": a, "tags": tags } });
-        let (artists, tags) = tallies(&[r("love", "A", &["pixel"]), r("like", "A", &["pixel", "glitch"]), r("pass", "B", &["ai"])]);
+        let (artists, tags) =
+            tallies(&[r("love", "A", &["pixel"]), r("like", "A", &["pixel", "glitch"]), r("pass", "B", &["ai"])]);
         assert_eq!(artists[0], ("A".to_string(), 3));
         assert_eq!(artists.last().unwrap(), &("B".to_string(), -1));
         assert_eq!(tags[0], ("pixel".to_string(), 3));

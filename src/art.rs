@@ -92,7 +92,9 @@ fn gql_live(query: &str, vars: Value) -> Result<Value, String> {
 }
 
 pub fn is_tez_address(s: &str) -> bool {
-    s.len() == 36 && ["tz1", "tz2", "tz3", "tz4", "KT1"].iter().any(|p| s.starts_with(p)) && s.chars().all(|c| c.is_ascii_alphanumeric())
+    s.len() == 36
+        && ["tz1", "tz2", "tz3", "tz4", "KT1"].iter().any(|p| s.starts_with(p))
+        && s.chars().all(|c| c.is_ascii_alphanumeric())
 }
 
 fn is_eth(s: &str) -> bool {
@@ -128,7 +130,9 @@ pub(crate) fn profile_url(addr: &str) -> String {
 fn royalty_pct(token: &Value) -> f64 {
     token["royalties"].as_array().map_or(0.0, |rs| {
         rs.iter()
-            .map(|r| num(&r["amount"]).unwrap_or(0) as f64 / 10f64.powi(num(&r["decimals"]).unwrap_or(0) as i32) * 100.0)
+            .map(|r| {
+                num(&r["amount"]).unwrap_or(0) as f64 / 10f64.powi(num(&r["decimals"]).unwrap_or(0) as i32) * 100.0
+            })
             .sum()
     })
 }
@@ -145,16 +149,25 @@ pub struct Who {
 impl Who {
     pub(crate) fn label(&self) -> String {
         let name = [self.alias.as_str(), self.tzdomain.as_str()].into_iter().find(|s| !s.is_empty()).unwrap_or("");
-        if name.is_empty() { short(&self.address) } else { format!("{name} ({})", short(&self.address)) }
+        if name.is_empty() {
+            short(&self.address)
+        } else {
+            format!("{name} ({})", short(&self.address))
+        }
     }
 }
 
 fn short(addr: &str) -> String {
-    if addr.len() > 12 { format!("{}…{}", &addr[..6], &addr[addr.len() - 4..]) } else { addr.to_string() }
+    if addr.len() > 12 {
+        format!("{}…{}", &addr[..6], &addr[addr.len() - 4..])
+    } else {
+        addr.to_string()
+    }
 }
 
 pub(crate) fn holder_label(h: &Value, addr: &str) -> String {
-    let name = h["alias"].as_str().filter(|s| !s.is_empty()).or_else(|| h["tzdomain"].as_str().filter(|s| !s.is_empty()));
+    let name =
+        h["alias"].as_str().filter(|s| !s.is_empty()).or_else(|| h["tzdomain"].as_str().filter(|s| !s.is_empty()));
     match name {
         Some(n) => format!("{n} ({})", short(addr)),
         None => short(addr),
@@ -166,7 +179,11 @@ pub(crate) fn flag_of(v: &Value) -> String {
         None | Some("") | Some("none") => String::new(),
         Some(f) => {
             let why = v["flag_reason"].as_str().unwrap_or("");
-            if why.is_empty() { f.to_string() } else { format!("{f}: {why}") }
+            if why.is_empty() {
+                f.to_string()
+            } else {
+                format!("{f}: {why}")
+            }
         }
     }
 }
@@ -182,7 +199,11 @@ pub fn resolve(who: &str) -> Result<Who, String> {
     if is_eth(who) {
         return Err(ETH_LATER.into());
     }
-    if ["tz1", "tz2", "tz3", "tz4", "KT1"].iter().any(|p| who.starts_with(p)) && who.len() >= 20 && !who.contains(' ') && !is_tez_address(who) {
+    if ["tz1", "tz2", "tz3", "tz4", "KT1"].iter().any(|p| who.starts_with(p))
+        && who.len() >= 20
+        && !who.contains(' ')
+        && !is_tez_address(who)
+    {
         return Err(format!(
             "`{who}` isn't a valid Tezos address ({} characters; real ones have 36): copy the address exactly from an earlier result",
             who.chars().count()
@@ -205,7 +226,9 @@ pub fn resolve(who: &str) -> Result<Who, String> {
         flag: flag_of(h),
     };
     match rows.len() {
-        0 if is_tez_address(who) => Ok(Who { address: who.into(), alias: String::new(), tzdomain: String::new(), flag: String::new() }),
+        0 if is_tez_address(who) => {
+            Ok(Who { address: who.into(), alias: String::new(), tzdomain: String::new(), flag: String::new() })
+        }
         0 => {
             // not an exact username: try a fuzzy search (username, .tez name, X handle, "a/b")
             let h = crate::art_find::best_match(who)?;
@@ -214,20 +237,26 @@ pub fn resolve(who: &str) -> Result<Who, String> {
         1 => Ok(to_who(&rows[0])),
         _ => Err(format!(
             "several profiles match \"{who}\": {}; use the address",
-            rows.iter().map(|h| format!("{} {}", h["alias"].as_str().unwrap_or(""), h["address"].as_str().unwrap_or(""))).collect::<Vec<_>>().join(", ")
+            rows.iter()
+                .map(|h| format!("{} {}", h["alias"].as_str().unwrap_or(""), h["address"].as_str().unwrap_or("")))
+                .collect::<Vec<_>>()
+                .join(", ")
         )),
     }
 }
 
-const WORKS_Q: &str = "query($a: String!, $n: Int!) { token(where: {creators: {creator_address: {_eq: $a}}, supply: {_gt: 0}}, \
+const WORKS_Q: &str =
+    "query($a: String!, $n: Int!) { token(where: {creators: {creator_address: {_eq: $a}}, supply: {_gt: 0}}, \
     order_by: {timestamp: desc}, limit: $n) { token_id fa_contract name supply timestamp lowest_ask mime } }";
 
 /// objkt events that are sales: fixed price, English and Dutch auctions, accepted
 /// offers and open editions. Free claims (price 0) are left out.
-pub(crate) const SALE_FILTER: &str = "price_xtz: {_gt: 0}, _or: [{marketplace_event_type: {_in: [\"list_buy\", \"english_auction_settle\", \
+pub(crate) const SALE_FILTER: &str =
+    "price_xtz: {_gt: 0}, _or: [{marketplace_event_type: {_in: [\"list_buy\", \"english_auction_settle\", \
     \"dutch_auction_buy\", \"offer_accept\", \"offer_floor_accept\"]}}, {event_type: {_eq: \"open_edition_buy\"}}]";
 
-pub(crate) const SALE_FIELDS: &str = "price_xtz amount timestamp marketplace_event_type event_type creator_address recipient_address \
+pub(crate) const SALE_FIELDS: &str =
+    "price_xtz amount timestamp marketplace_event_type event_type creator_address recipient_address \
     recipient { alias tzdomain }";
 
 /// One sale in the shape the rest of this file uses: seller/buyer addresses,
@@ -262,7 +291,10 @@ fn sales_rows(addr: &str, since: &str, n: usize) -> Result<Vec<Value>, String> {
          timestamp: {{_gte: $since}}, {SALE_FILTER}}}, order_by: {{timestamp: desc}}, limit: $n) {{ {SALE_FIELDS} \
          token {{ name token_id fa_contract royalties {{ amount decimals }} }} }} }}"
     );
-    Ok(gql(&q, json!({ "a": addr, "since": since, "n": n.min(500) }))?["event"].as_array().map(|a| a.iter().map(sale).collect()).unwrap_or_default())
+    Ok(gql(&q, json!({ "a": addr, "since": since, "n": n.min(500) }))?["event"]
+        .as_array()
+        .map(|a| a.iter().map(sale).collect())
+        .unwrap_or_default())
 }
 
 fn works_rows(addr: &str, n: usize) -> Result<Vec<Value>, String> {
@@ -380,7 +412,11 @@ pub fn sales(who: &str, days: u64) -> Result<String, String> {
     let w = resolve(who)?;
     let days = days.clamp(1, 365);
     let rows = sales_rows(&w.address, &since(days * 24 * 60), 500)?;
-    Ok(format!("{NOTE}\nSales of work by {}:{}", w.label(), sales_summary(&w.address, &rows, &format!("last {days} days"))))
+    Ok(format!(
+        "{NOTE}\nSales of work by {}:{}",
+        w.label(),
+        sales_summary(&w.address, &rows, &format!("last {days} days"))
+    ))
 }
 
 /// "KT1…/123", "KT1… 123", "KT1…:123" or an objkt URL.
@@ -401,7 +437,8 @@ fn piece_q() -> String {
     )
 }
 
-const COPIES_Q: &str = "query($n: String!, $a: [String!]!) { token(where: {name: {_eq: $n}, creators: {creator_address: {_nin: $a}}}, \
+const COPIES_Q: &str =
+    "query($n: String!, $a: [String!]!) { token(where: {name: {_eq: $n}, creators: {creator_address: {_nin: $a}}}, \
     limit: 5) { fa_contract token_id creators { creator_address } } }";
 
 pub fn piece(spec: &str) -> Result<String, String> {
@@ -413,7 +450,8 @@ pub fn piece(spec: &str) -> Result<String, String> {
     let t = d["token"].get(0).cloned().ok_or(format!("no token {id} on contract {c}"))?;
     let name = t["name"].as_str().filter(|s| !s.is_empty()).unwrap_or("(untitled)").to_string();
     let creators = t["creators"].as_array().cloned().unwrap_or_default();
-    let creator_addrs: Vec<String> = creators.iter().filter_map(|x| x["creator_address"].as_str().map(String::from)).collect();
+    let creator_addrs: Vec<String> =
+        creators.iter().filter_map(|x| x["creator_address"].as_str().map(String::from)).collect();
     let holders = t["holders"].as_array().cloned().unwrap_or_default();
     let sales: Vec<Value> = t["events"].as_array().map(|a| a.iter().map(sale).collect()).unwrap_or_default();
 
@@ -506,8 +544,11 @@ pub(crate) fn wash_pattern(sales: &[Value]) -> Option<String> {
 
 /// Median per-edition sale price (same units as the sales), if there are enough sales to judge.
 pub(crate) fn median_unit(sales: &[Value]) -> Option<f64> {
-    let mut prices: Vec<f64> =
-        sales.iter().filter_map(|s| num(&s["unit_xtz"]).or_else(|| num(&s["price_xtz"])).map(|p| p as f64)).filter(|p| *p > 0.0).collect();
+    let mut prices: Vec<f64> = sales
+        .iter()
+        .filter_map(|s| num(&s["unit_xtz"]).or_else(|| num(&s["price_xtz"])).map(|p| p as f64))
+        .filter(|p| *p > 0.0)
+        .collect();
     if prices.len() < 3 {
         return None;
     }
@@ -528,8 +569,12 @@ const HOLD_Q: &str = "query($a: String!, $n: Int!) { token_holder(where: {holder
 
 pub fn holdings(who: &str, n: usize) -> Result<String, String> {
     let w = resolve(who)?;
-    let rows = gql(HOLD_Q, json!({ "a": w.address, "n": n.clamp(1, 50) }))?["token_holder"].as_array().cloned().unwrap_or_default();
-    let mut out = format!("{NOTE}\nCollection of {} (most recently acquired first, {} shown):\n", w.label(), rows.len());
+    let rows = gql(HOLD_Q, json!({ "a": w.address, "n": n.clamp(1, 50) }))?["token_holder"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let mut out =
+        format!("{NOTE}\nCollection of {} (most recently acquired first, {} shown):\n", w.label(), rows.len());
     let mut asks = 0i64;
     for r in &rows {
         let t = &r["token"];
@@ -549,7 +594,10 @@ pub fn holdings(who: &str, n: usize) -> Result<String, String> {
         );
     }
     if asks > 0 {
-        out += &format!("Sum of current lowest asks for the pieces shown: {} (asks, not sales, so not a valuation)\n", tez(asks));
+        out += &format!(
+            "Sum of current lowest asks for the pieces shown: {} (asks, not sales, so not a valuation)\n",
+            tez(asks)
+        );
     }
     Ok(out)
 }
@@ -742,7 +790,10 @@ pub(crate) fn keep_preview(home: &std::path::Path, name: &str, bytes: &[u8]) -> 
             let _ = std::fs::remove_file(p);
         }
     }
-    format!("\nSaved as {}: if the user wants the image, send it with send_file (don't download it again).", file.display())
+    format!(
+        "\nSaved as {}: if the user wants the image, send it with send_file (don't download it again).",
+        file.display()
+    )
 }
 
 /// Show the model a piece's preview image, so it can describe the art itself.
@@ -765,7 +816,8 @@ pub fn look(home: &std::path::Path, spec: &str) -> Result<String, String> {
         }
     }
     let bytes = bytes?;
-    let data_url = crate::util::image_data_url(&bytes).map_err(|e| format!("the preview isn't a picture pagurus can show ({e})"))?;
+    let data_url = crate::util::image_data_url(&bytes)
+        .map_err(|e| format!("the preview isn't a picture pagurus can show ({e})"))?;
     crate::tools::show_image(format!("{name} ({})", piece_url(&c, &id)), data_url);
     Ok(format!(
         "The preview of \"{name}\" ({} KB, original format {}) is attached below for you to look at. Describe what you see; \
@@ -843,7 +895,13 @@ pub fn run_tool(home: &std::path::Path, a: &Value) -> Result<String, String> {
         use crate::art_taste as t;
         let spec = if piece_arg.is_empty() { who } else { piece_arg };
         let text = |k: &str| a[k].as_str().unwrap_or("");
-        let need = || if spec.is_empty() { Err("which piece? give piece= (objkt or OpenSea link, or contract/id)".to_string()) } else { Ok(spec) };
+        let need = || {
+            if spec.is_empty() {
+                Err("which piece? give piece= (objkt or OpenSea link, or contract/id)".to_string())
+            } else {
+                Ok(spec)
+            }
+        };
         match a["action"].as_str().unwrap_or("") {
             "rate" => return t::rate(home, need()?, text("verdict"), text("why")),
             "taste" => return t::taste(home, a["note"].as_str()),
@@ -873,7 +931,9 @@ pub fn run_tool(home: &std::path::Path, a: &Value) -> Result<String, String> {
     };
     // `query` is what models reach for when searching by name
     let who = if who.is_empty() && action == "search" { a["query"].as_str().unwrap_or("") } else { who };
-    if who.is_empty() && matches!(action, "artist" | "works" | "sales" | "collectors" | "holdings" | "similar" | "search") {
+    if who.is_empty()
+        && matches!(action, "artist" | "works" | "sales" | "collectors" | "holdings" | "similar" | "search")
+    {
         return Err("no artist or wallet given. To find artists use action=trending, quiet, new, style or similar; otherwise ask the user".into());
     }
     match action {
@@ -892,7 +952,14 @@ pub fn run_tool(home: &std::path::Path, a: &Value) -> Result<String, String> {
         "sales" => sales(who, a["days"].as_u64().unwrap_or(30)),
         "collectors" => collectors(who, n),
         "holdings" => holdings(who, n),
-        "watch" => watch(home, a["kind"].as_str().unwrap_or(""), who, piece_arg, a["below"].as_f64(), a["every_minutes"].as_u64().unwrap_or(30)),
+        "watch" => watch(
+            home,
+            a["kind"].as_str().unwrap_or(""),
+            who,
+            piece_arg,
+            a["below"].as_f64(),
+            a["every_minutes"].as_u64().unwrap_or(30),
+        ),
         "" => Err("say what to look up: action=artist, works, piece, sales, collectors, holdings or watch".into()),
         other => Err(format!("unknown art action `{other}`")),
     }
@@ -917,12 +984,26 @@ fn run_eth(home: &std::path::Path, a: &Value, who: &str, piece_arg: &str) -> Res
         "sales" => e::sales(home, who, a["days"].as_u64().unwrap_or(30)),
         "collectors" => e::collectors(home, who),
         "holdings" => e::holdings(home, who, n),
-        "watch" => watch_eth(home, a["kind"].as_str().unwrap_or(""), who, piece_arg, a["below"].as_f64(), a["every_minutes"].as_u64().unwrap_or(30)),
+        "watch" => watch_eth(
+            home,
+            a["kind"].as_str().unwrap_or(""),
+            who,
+            piece_arg,
+            a["below"].as_f64(),
+            a["every_minutes"].as_u64().unwrap_or(30),
+        ),
         _ => Err("say what to look up: action=trending, artist, works, piece, look, sales, holdings or watch".into()),
     }
 }
 
-fn watch_eth(home: &std::path::Path, kind: &str, who: &str, piece_spec: &str, below: Option<f64>, every: u64) -> Result<String, String> {
+fn watch_eth(
+    home: &std::path::Path,
+    kind: &str,
+    who: &str,
+    piece_spec: &str,
+    below: Option<f64>,
+    every: u64,
+) -> Result<String, String> {
     let every = every.clamp(5, 24 * 60);
     let line = match kind {
         "sold" => {
@@ -947,16 +1028,28 @@ fn watch_eth(home: &std::path::Path, kind: &str, who: &str, piece_spec: &str, be
 
 /// Write a correct zero-token check into HEARTBEAT.md: the look-back window equals
 /// the interval, so nothing falls between two runs.
-pub fn watch(home: &std::path::Path, kind: &str, who: &str, piece_spec: &str, below: Option<f64>, every: u64) -> Result<String, String> {
+pub fn watch(
+    home: &std::path::Path,
+    kind: &str,
+    who: &str,
+    piece_spec: &str,
+    below: Option<f64>,
+    every: u64,
+) -> Result<String, String> {
     let every = every.clamp(5, 24 * 60);
     let line = match kind {
         "new" | "sold" => {
             let w = resolve(who)?;
-            let what = if kind == "new" { format!("new work by {}", w.label()) } else { format!("a sale of {}'s work", w.label()) };
+            let what = if kind == "new" {
+                format!("new work by {}", w.label())
+            } else {
+                format!("a sale of {}'s work", w.label())
+            };
             format!("`pagurus art {kind} {} {every}` > 0 {what}", w.address)
         }
         "ask" => {
-            let (c, id) = parse_piece(if piece_spec.is_empty() { who } else { piece_spec }).ok_or("watch kind=ask needs the piece (objkt link or KT1…/id)")?;
+            let (c, id) = parse_piece(if piece_spec.is_empty() { who } else { piece_spec })
+                .ok_or("watch kind=ask needs the piece (objkt link or KT1…/id)")?;
             let below = below.filter(|b| *b > 0.0).ok_or("watch kind=ask needs `below`: the price in tez")?;
             format!("`pagurus art ask {c}/{id}` < {below} {} listed under {below} ꜩ", piece_url(&c, &id))
         }
@@ -1000,13 +1093,27 @@ pub fn cli(args: &[String]) -> Result<String, String> {
         let rest = || args[2.min(args.len())..].join(" ");
         let piece = || args.get(1).map(String::as_str).unwrap_or("");
         match args.first().map(String::as_str).unwrap_or("") {
-            "rate" => return t::rate(&home, piece(), args.get(2).map(String::as_str).unwrap_or(""), &args[3.min(args.len())..].join(" ")),
+            "rate" => {
+                return t::rate(
+                    &home,
+                    piece(),
+                    args.get(2).map(String::as_str).unwrap_or(""),
+                    &args[3.min(args.len())..].join(" "),
+                )
+            }
             "taste" => return t::taste(&home, None),
             "wish" => return t::wish(&home, piece(), &rest()),
             "unwish" => return t::unwish(&home, piece()),
             "wishlist" => return Ok(t::wishlist(&home)),
             "proposals" => return Ok(t::proposals(&home)),
-            "propose" => return t::propose(&home, piece(), &args[3.min(args.len())..].join(" "), args.get(2).and_then(|f| f.parse().ok())),
+            "propose" => {
+                return t::propose(
+                    &home,
+                    piece(),
+                    &args[3.min(args.len())..].join(" "),
+                    args.get(2).and_then(|f| f.parse().ok()),
+                )
+            }
             "budget" => return t::budget(&home),
             "weekly" => return t::weekly(&home, args.get(1).map(String::as_str), args.get(2).map(String::as_str)),
             _ => {}
@@ -1028,7 +1135,9 @@ pub fn cli(args: &[String]) -> Result<String, String> {
             "piece" => e::piece(&home, &args[1..].join(" ")),
             "look" => e::look(&home, &args[1..].join(" ")),
             "eth-sold" | "sold" => e::sold_count(&home, a(1), n(2, 60)).map(|c| c.to_string()),
-            "eth-ask" | "ask" => e::lowest_ask(&home, &args[1..].join(" ")).map(|p| p.map_or("999999999".into(), |v| format!("{v}"))),
+            "eth-ask" | "ask" => {
+                e::lowest_ask(&home, &args[1..].join(" ")).map(|p| p.map_or("999999999".into(), |v| format!("{v}")))
+            }
             _ => Err(USAGE.into()),
         };
     }
@@ -1050,7 +1159,8 @@ pub fn cli(args: &[String]) -> Result<String, String> {
         "collectors" => collectors(a(1), n(2, 20) as usize),
         "holdings" => holdings(a(1), n(2, 20) as usize),
         "piece" => piece(&args[1..].join(" ")),
-        "look" => look(&home, &args[1..].join(" ")).map(|m| format!("{m}\n(in a chat the model sees the image; here only the download is checked)")),
+        "look" => look(&home, &args[1..].join(" "))
+            .map(|m| format!("{m}\n(in a chat the model sees the image; here only the download is checked)")),
         "new" => new_count(a(1), n(2, 60)).map(|c| c.to_string()),
         "sold" => sold_count(a(1), n(2, 60)).map(|c| c.to_string()),
         "ask" => lowest_ask(&args[1..].join(" ")).map(|p| p.map_or("999999999".into(), |t| format!("{t}"))),
@@ -1092,7 +1202,9 @@ mod tests {
         assert!(check("pagurus art ask nothing-here").unwrap().is_err());
         let home = std::env::temp_dir().join(format!("pagurus-art-{}", crate::util::new_id()));
         std::fs::create_dir_all(&home).unwrap();
-        let out = watch(&home, "ask", "", "https://objkt.com/tokens/KT1LnP9xJM1Y5mnCvXnwpUQzTi3z5yYcwhu7/182", Some(5.0), 30).unwrap();
+        let out =
+            watch(&home, "ask", "", "https://objkt.com/tokens/KT1LnP9xJM1Y5mnCvXnwpUQzTi3z5yYcwhu7/182", Some(5.0), 30)
+                .unwrap();
         assert!(out.contains("every 30 min"), "{out}");
         let hb = std::fs::read_to_string(home.join("HEARTBEAT.md")).unwrap();
         let line = hb.lines().find(|l| l.contains("pagurus art ask")).expect("watch line written");
@@ -1100,7 +1212,10 @@ mod tests {
         let c = crate::tasks::parse_check(&task.text).expect("is a zero-token check");
         assert_eq!((c.op.as_str(), c.limit), ("<", 5.0));
         assert!(c.cmd.starts_with("pagurus art ask KT1LnP9xJM1Y5mnCvXnwpUQzTi3z5yYcwhu7/182"));
-        assert!(watch(&home, "ask", "", "KT1LnP9xJM1Y5mnCvXnwpUQzTi3z5yYcwhu7/182", None, 30).is_err(), "needs a price");
+        assert!(
+            watch(&home, "ask", "", "KT1LnP9xJM1Y5mnCvXnwpUQzTi3z5yYcwhu7/182", None, 30).is_err(),
+            "needs a price"
+        );
         assert!(watch(&home, "fly", "x", "", None, 30).is_err());
     }
 
@@ -1110,7 +1225,11 @@ mod tests {
         assert_eq!(image_urls("ipfs://QmAbc/1.png")[1], "https://gateway.pinata.cloud/ipfs/QmAbc/1.png");
         assert_eq!(image_urls("ipfs://QmAbc").len(), 3);
         assert_eq!(image_urls("https://x.example/a.jpg"), vec!["https://x.example/a.jpg".to_string()]);
-        assert!(image_urls("").is_empty() && image_urls("ipfs://").is_empty() && image_urls("file:///etc/passwd").is_empty());
+        assert!(
+            image_urls("").is_empty()
+                && image_urls("ipfs://").is_empty()
+                && image_urls("file:///etc/passwd").is_empty()
+        );
     }
 
     #[test]
@@ -1118,9 +1237,16 @@ mod tests {
         let e = json!({"price_xtz": 1_000_000, "amount": 2, "marketplace_event_type": "list_buy",
             "creator_address": "tzSELLER", "recipient_address": "tzBUYER", "timestamp": "2026-11-19T00:00:00+00:00"});
         let s = sale(&e);
-        assert_eq!((num(&s["price_xtz"]), num(&s["unit_xtz"])), (Some(2_000_000), Some(1_000_000)), "total = unit × editions");
+        assert_eq!(
+            (num(&s["price_xtz"]), num(&s["unit_xtz"])),
+            (Some(2_000_000), Some(1_000_000)),
+            "total = unit × editions"
+        );
         assert_eq!((s["seller_address"].as_str(), s["buyer_address"].as_str()), (Some("tzSELLER"), Some("tzBUYER")));
-        assert_eq!(sale(&json!({"marketplace_event_type": "english_auction_settle", "price_xtz": 5}))["kind"], "auction");
+        assert_eq!(
+            sale(&json!({"marketplace_event_type": "english_auction_settle", "price_xtz": 5}))["kind"],
+            "auction"
+        );
         assert_eq!(sale(&json!({"event_type": "open_edition_buy", "price_xtz": 5}))["kind"], "open edition");
         assert_eq!(sale(&json!({"marketplace_event_type": "offer_floor_accept", "price_xtz": 5}))["kind"], "offer");
     }
@@ -1136,8 +1262,17 @@ mod tests {
         let recorded: Value = serde_json::from_str(include_str!("art_fixtures/piece.json")).unwrap();
         mock(vec![recorded, json!({"token": []})]);
         let out = piece(PIECE).unwrap();
-        for want in ["LAN Party", "verified", "edition of 10", "2 holder(s)", "royalties 10.0%", "Lowest ask now: 20 ꜩ",
-            "Recent sales (price per edition)", "Preview image: https://assets.objkt.media/", "No red flags"] {
+        for want in [
+            "LAN Party",
+            "verified",
+            "edition of 10",
+            "2 holder(s)",
+            "royalties 10.0%",
+            "Lowest ask now: 20 ꜩ",
+            "Recent sales (price per edition)",
+            "Preview image: https://assets.objkt.media/",
+            "No red flags",
+        ] {
             assert!(out.contains(want), "missing {want:?} in:\n{out}");
         }
     }
@@ -1150,14 +1285,22 @@ mod tests {
         t["creators"][0]["holder"]["flag"] = json!("flagged");
         t["creators"][0]["holder"]["flag_reason"] = json!("copyminting");
         t["lowest_ask"] = json!(500_000_000);
-        let ev = |seller: &str, buyer: &str, p: i64| json!({"price_xtz": p, "amount": 1, "marketplace_event_type": "list_buy",
-            "creator_address": seller, "recipient_address": buyer, "timestamp": "2026-11-18T00:00:00+00:00"});
+        let ev = |seller: &str, buyer: &str, p: i64| {
+            json!({"price_xtz": p, "amount": 1, "marketplace_event_type": "list_buy",
+            "creator_address": seller, "recipient_address": buyer, "timestamp": "2026-11-18T00:00:00+00:00"})
+        };
         t["events"] = json!([ev("tzA", "tzB", 10_000_000), ev("tzB", "tzA", 11_000_000), ev("tzA", "tzC", 12_000_000)]);
         let copies = json!({"token": [{"fa_contract": "KT1LnP9xJM1Y5mnCvXnwpUQzTi3z5yYcwhu7", "token_id": "9", "creators": []}]});
         mock(vec![d, copies]);
         let out = piece(PIECE).unwrap();
-        for want in ["flagged the creator account (flagged: copyminting)", "isn't verified", "sold this piece back and forth",
-            "over 3× the median sale", "same title", "Look at these before buying"] {
+        for want in [
+            "flagged the creator account (flagged: copyminting)",
+            "isn't verified",
+            "sold this piece back and forth",
+            "over 3× the median sale",
+            "same title",
+            "Look at these before buying",
+        ] {
             assert!(out.contains(want), "missing {want:?} in:\n{out}");
         }
         assert!(!out.contains("No red flags"));

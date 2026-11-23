@@ -118,7 +118,8 @@ fn path(home: &Path) -> std::path::PathBuf {
 fn refresh(home: &Path) -> Result<Index, String> {
     let files = super::session_files(home);
     let mut ix = std::fs::read(path(home)).ok().and_then(decode).unwrap_or_default();
-    let known: HashMap<String, (usize, u64)> = ix.sessions.iter().enumerate().map(|(i, (n, b))| (n.clone(), (i, *b))).collect();
+    let known: HashMap<String, (usize, u64)> =
+        ix.sessions.iter().enumerate().map(|(i, (n, b))| (n.clone(), (i, *b))).collect();
     if ix.raw.is_empty() || files.iter().any(|(n, len)| known.get(n).is_some_and(|k| *len < k.1)) {
         ix = Index::default();
     }
@@ -232,7 +233,9 @@ pub fn search(home: &Path, q: &Query, terms: &[(String, bool)]) -> Result<Vec<Hi
     // doc → (BM25 score, which query terms matched)
     let mut scores: HashMap<u32, (f64, u32)> = HashMap::new();
     entries(&ix.raw[ix.terms..], |term, df, _, postings| {
-        let Some(qi) = terms.iter().position(|(t, p)| if *p { term.starts_with(t.as_str()) } else { term == t }) else { return };
+        let Some(qi) = terms.iter().position(|(t, p)| if *p { term.starts_with(t.as_str()) } else { term == t }) else {
+            return;
+        };
         let idf = (1.0 + (n - df as f64 + 0.5) / (df as f64 + 0.5)).ln();
         let mut r = Reader { b: postings, pos: 0 };
         let mut doc = 0u64;
@@ -285,7 +288,14 @@ pub fn search(home: &Path, q: &Query, terms: &[(String, bool)]) -> Result<Vec<Hi
         }
         let Some((sid, t, role, text)) = msg(id) else { continue };
         *seen += 1;
-        hits.push(Hit { sid, t, role, text, prev: neighbour(id.checked_sub(1), session), next: neighbour(Some(id + 1), session) });
+        hits.push(Hit {
+            sid,
+            t,
+            role,
+            text,
+            prev: neighbour(id.checked_sub(1), session),
+            next: neighbour(Some(id + 1), session),
+        });
         if hits.len() >= q.limit {
             break;
         }

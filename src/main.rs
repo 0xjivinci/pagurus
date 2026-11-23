@@ -2,6 +2,8 @@ mod agent;
 #[cfg(feature = "art")]
 mod art;
 #[cfg(feature = "art")]
+mod art_dash;
+#[cfg(feature = "art")]
 mod art_eth;
 #[cfg(feature = "art")]
 mod art_find;
@@ -9,13 +11,11 @@ mod art_find;
 mod art_report;
 #[cfg(feature = "art")]
 mod art_taste;
-#[cfg(feature = "art")]
-mod art_dash;
 mod ask;
 mod autonomy;
+mod board;
 #[cfg(feature = "browser")]
 mod browser;
-mod board;
 mod bundled;
 mod channel;
 #[cfg(feature = "code")]
@@ -33,9 +33,9 @@ mod learn;
 mod llm;
 mod mcp;
 mod peer;
-mod search;
 mod procs;
 mod remote;
+mod search;
 mod setup;
 mod skills;
 mod store;
@@ -115,7 +115,22 @@ fn run(args: &[String]) -> Result<(), String> {
     let cmd = args.first().map(String::as_str).unwrap_or("chat");
     // `pagurus doctor | head`: short commands stop quietly when the reader goes away,
     // like other Unix tools, instead of panicking (long-running ones keep Rust's default)
-    if matches!(cmd, "doctor" | "audit" | "skills" | "learn" | "art" | "version" | "-V" | "--version" | "help" | "--help" | "-h" | "board" | "model") {
+    if matches!(
+        cmd,
+        "doctor"
+            | "audit"
+            | "skills"
+            | "learn"
+            | "art"
+            | "version"
+            | "-V"
+            | "--version"
+            | "help"
+            | "--help"
+            | "-h"
+            | "board"
+            | "model"
+    ) {
         quiet_on_closed_pipe();
     }
     // skills that came with this version: installed once, on a home that already exists
@@ -161,7 +176,8 @@ fn run(args: &[String]) -> Result<(), String> {
             let mut rest = &args[1..];
             // `--yolo` or `--yolo=2h`: this one run needs no approvals (the safety floor stays)
             if let Some(y) = rest.first().and_then(|a| a.strip_prefix("--yolo")) {
-                let secs = autonomy::parse_duration(y.trim_start_matches('=')).ok_or("usage: pagurus run --yolo[=30m] <prompt>")?;
+                let secs = autonomy::parse_duration(y.trim_start_matches('='))
+                    .ok_or("usage: pagurus run --yolo[=30m] <prompt>")?;
                 autonomy::set_yolo(secs);
                 eprintln!("⚡ yolo for this run ({}): commands run without asking, the safety floor stays, all logged (`pagurus audit`)", autonomy::fmt_left(secs));
                 rest = &rest[1..];
@@ -186,7 +202,9 @@ fn run(args: &[String]) -> Result<(), String> {
         }
         "daemon" => daemon::run(home.clone(), config::load(&home)?),
         "learn" => learn::cli(&home, &args[1..]),
-        "skills" if args.get(1).is_some_and(|a| a == "install") && args.len() > 2 => hub::cli(&home, &config::load(&home)?, &args[2..]),
+        "skills" if args.get(1).is_some_and(|a| a == "install") && args.len() > 2 => {
+            hub::cli(&home, &config::load(&home)?, &args[2..])
+        }
         "rollback" => {
             println!("{}", files::rollback(&home, &args[1..].join(" "))?);
             Ok(())
@@ -303,7 +321,10 @@ fn init(home: &Path) -> Result<(), String> {
         println!("  skills   {}", installed.join(", "));
     }
     if std::env::args().nth(1).as_deref() != Some("setup") {
-        println!("\nNext: `pagurus setup` for a guided setup, or edit config.toml and put PAGURUS_API_KEY=… in {}", home.join("env").display());
+        println!(
+            "\nNext: `pagurus setup` for a guided setup, or edit config.toml and put PAGURUS_API_KEY=… in {}",
+            home.join("env").display()
+        );
     }
     Ok(())
 }
@@ -318,7 +339,11 @@ fn doctor(home: &Path) -> Result<(), String> {
         .map(|rd| rd.filter_map(|e| e.ok()?.metadata().ok()).fold((0, 0), |(n, b), m| (n + 1, b + m.len())))
         .unwrap_or((0, 0));
     println!("pagurus {}  ·  home {}", crate::util::version(), home.display());
-    println!("{}model      {}", ok(!cfg.provider.model.is_empty()), if cfg.provider.model.is_empty() { "(unset)" } else { &cfg.provider.model });
+    println!(
+        "{}model      {}",
+        ok(!cfg.provider.model.is_empty()),
+        if cfg.provider.model.is_empty() { "(unset)" } else { &cfg.provider.model }
+    );
     println!("   endpoint   {}", cfg.provider.base_url);
     if !cfg.provider.fallback_models.is_empty() {
         println!("   fallbacks  {}", cfg.provider.fallback_models.join(", "));
@@ -326,22 +351,50 @@ fn doctor(home: &Path) -> Result<(), String> {
     for f in &cfg.provider.fallback {
         let env = f.api_key_env.as_deref().unwrap_or(&cfg.provider.api_key_env);
         let has = std::env::var(env).is_ok_and(|k| !k.trim().is_empty());
-        println!("   fallback   {} @ {} (key {env}: {})", f.model, f.base_url.as_deref().unwrap_or(&cfg.provider.base_url), if has { "set" } else { "MISSING" });
+        println!(
+            "   fallback   {} @ {} (key {env}: {})",
+            f.model,
+            f.base_url.as_deref().unwrap_or(&cfg.provider.base_url),
+            if has { "set" } else { "MISSING" }
+        );
     }
-    println!("{}api key    ${} {}", ok(key), cfg.provider.api_key_env, if key { "set" } else { "not set (fine for a local Ollama)" });
+    println!(
+        "{}api key    ${} {}",
+        ok(key),
+        cfg.provider.api_key_env,
+        if key { "set" } else { "not set (fine for a local Ollama)" }
+    );
     println!("   learning   {}  ·  {} pending", cfg.learning.mode, learn::pending(home).len());
     println!("{}MEMORY.md  {mem}/{} chars", ok(mem <= cfg.learning.memory_char_limit), cfg.learning.memory_char_limit);
     println!("{}USER.md    {user}/{} chars", ok(user <= cfg.learning.user_char_limit), cfg.learning.user_char_limit);
     println!("   skills     {}", tools::skill_index(home).len());
     println!("   sessions   {n} files, {} KiB", bytes / 1024);
-    println!("   shell      {} · autonomy {} (allow: {})", cfg.tools.shell, cfg.tools.autonomy, cfg.tools.shell_allow.join(" "));
+    println!(
+        "   shell      {} · autonomy {} (allow: {})",
+        cfg.tools.shell,
+        cfg.tools.autonomy,
+        cfg.tools.shell_allow.join(" ")
+    );
     if cfg.tools.autonomy == "auto" {
-        println!("   auto_allow {}", if cfg.tools.auto_allow.is_empty() { "(empty: auto works like ask)".into() } else { cfg.tools.auto_allow.join(" · ") });
+        println!(
+            "   auto_allow {}",
+            if cfg.tools.auto_allow.is_empty() {
+                "(empty: auto works like ask)".into()
+            } else {
+                cfg.tools.auto_allow.join(" · ")
+            }
+        );
     }
     println!("   heartbeat  {} task(s) every {}m", daemon::heartbeat_tasks(home).len(), cfg.daemon.heartbeat_minutes);
     if let Some(t) = &cfg.telegram {
         let tok = std::env::var(&t.token_env).is_ok();
-        println!("{}telegram   ${} {} · {} allowed chat(s)", ok(tok && !t.allowed_chat_ids.is_empty()), t.token_env, if tok { "set" } else { "NOT set" }, t.allowed_chat_ids.len());
+        println!(
+            "{}telegram   ${} {} · {} allowed chat(s)",
+            ok(tok && !t.allowed_chat_ids.is_empty()),
+            t.token_env,
+            if tok { "set" } else { "NOT set" },
+            t.allowed_chat_ids.len()
+        );
     }
     println!("   board      {} · {} worker(s)", board::summary(home), cfg.board.workers);
     println!("{}", peer::doctor_line(home, &cfg));
@@ -351,11 +404,24 @@ fn doctor(home: &Path) -> Result<(), String> {
     let set = |n: &str| std::env::var(n).is_ok_and(|v| !v.trim().is_empty());
     if let Some(d) = &cfg.discord {
         let tok = set(&d.token_env);
-        println!("{}discord    ${} {} · {} allowed user(s)", ok(tok && !d.allowed_user_ids.is_empty()), d.token_env, if tok { "set" } else { "NOT set" }, d.allowed_user_ids.len());
+        println!(
+            "{}discord    ${} {} · {} allowed user(s)",
+            ok(tok && !d.allowed_user_ids.is_empty()),
+            d.token_env,
+            if tok { "set" } else { "NOT set" },
+            d.allowed_user_ids.len()
+        );
     }
     if let Some(s) = &cfg.slack {
         let tok = set(&s.bot_token_env) && set(&s.app_token_env);
-        println!("{}slack      ${} + ${} {} · {} allowed user(s)", ok(tok && !s.allowed_user_ids.is_empty()), s.bot_token_env, s.app_token_env, if tok { "set" } else { "NOT set" }, s.allowed_user_ids.len());
+        println!(
+            "{}slack      ${} + ${} {} · {} allowed user(s)",
+            ok(tok && !s.allowed_user_ids.is_empty()),
+            s.bot_token_env,
+            s.app_token_env,
+            if tok { "set" } else { "NOT set" },
+            s.allowed_user_ids.len()
+        );
     }
     if let Some(e) = &cfg.email {
         let pw = set(&e.password_env);
@@ -399,7 +465,11 @@ fn risks(home: &Path, cfg: &config::Config) -> Vec<String> {
         let mode = |p: &Path| std::fs::metadata(p).ok().map(|m| m.permissions().mode() & 0o777);
         let env = home.join("env");
         if let Some(m) = mode(&env).filter(|m| m & 0o077 != 0) {
-            v.push(format!("{} is mode {m:o}: other users can read your API keys. Fix: chmod 600 {}", env.display(), env.display()));
+            v.push(format!(
+                "{} is mode {m:o}: other users can read your API keys. Fix: chmod 600 {}",
+                env.display(),
+                env.display()
+            ));
         }
         if let Some(m) = mode(home).filter(|m| m & 0o077 != 0) {
             v.push(format!(
@@ -410,7 +480,10 @@ fn risks(home: &Path, cfg: &config::Config) -> Vec<String> {
         }
         let conf = home.join("config.toml");
         if let Some(m) = mode(&conf).filter(|m| m & 0o022 != 0) {
-            v.push(format!("{} is writable by others (mode {m:o}): they could widen what pagurus runs. Fix: chmod 600 it", conf.display()));
+            v.push(format!(
+                "{} is writable by others (mode {m:o}): they could widen what pagurus runs. Fix: chmod 600 it",
+                conf.display()
+            ));
         }
     }
     let conf = util::read(&home.join("config.toml"));
@@ -427,26 +500,36 @@ fn risks(home: &Path, cfg: &config::Config) -> Vec<String> {
         let p = p.canonicalize().unwrap_or(p);
         let covers = |x: &Path| x.starts_with(&p) || x.canonicalize().is_ok_and(|x| x.starts_with(&p));
         if covers(home) || p == Path::new("/") || p.starts_with("/etc") || user_home.as_deref().is_some_and(covers) {
-            v.push(format!("tools.write_roots has {r}: write_file could overwrite pagurus's own config, ~/.ssh or system files"));
+            v.push(format!(
+                "tools.write_roots has {r}: write_file could overwrite pagurus's own config, ~/.ssh or system files"
+            ));
         }
     }
     let plain_http = |url: &str| {
         let host = url.strip_prefix("http://").map(|r| r.split(['/', ':']).next().unwrap_or(""));
         host.is_some_and(|h| {
-            let local = h == "localhost" || h.ends_with(".local") || h.parse::<std::net::IpAddr>().is_ok_and(|ip| match ip {
-                std::net::IpAddr::V4(a) => a.is_loopback() || a.is_private() || a.is_link_local(),
-                std::net::IpAddr::V6(a) => a.is_loopback(),
-            });
+            let local = h == "localhost"
+                || h.ends_with(".local")
+                || h.parse::<std::net::IpAddr>().is_ok_and(|ip| match ip {
+                    std::net::IpAddr::V4(a) => a.is_loopback() || a.is_private() || a.is_link_local(),
+                    std::net::IpAddr::V6(a) => a.is_loopback(),
+                });
             !local
         })
     };
     let has_key = |env: &str| std::env::var(env).is_ok_and(|k| !k.trim().is_empty());
     if plain_http(&cfg.provider.base_url) && has_key(&cfg.provider.api_key_env) {
-        v.push(format!("{} is plain http: your API key would cross the internet unencrypted. Use https", cfg.provider.base_url));
+        v.push(format!(
+            "{} is plain http: your API key would cross the internet unencrypted. Use https",
+            cfg.provider.base_url
+        ));
     }
     for f in &cfg.provider.fallback {
         let url = f.base_url.as_deref().unwrap_or(&cfg.provider.base_url);
-        if plain_http(url) && has_key(f.api_key_env.as_deref().unwrap_or(&cfg.provider.api_key_env)) && url != cfg.provider.base_url {
+        if plain_http(url)
+            && has_key(f.api_key_env.as_deref().unwrap_or(&cfg.provider.api_key_env))
+            && url != cfg.provider.base_url
+        {
             v.push(format!("fallback {url} is plain http: its API key would cross the internet unencrypted"));
         }
     }
@@ -483,7 +566,11 @@ mod tests {
         assert!(s.contains("--proto '=https' --proto-redir '=https'") && s.contains("--https-only"));
         assert!(s.contains("checksum mismatch"));
         #[cfg(unix)]
-        assert!(std::process::Command::new("sh").args(["-n", concat!(env!("CARGO_MANIFEST_DIR"), "/install.sh")]).status().unwrap().success());
+        assert!(std::process::Command::new("sh")
+            .args(["-n", concat!(env!("CARGO_MANIFEST_DIR"), "/install.sh")])
+            .status()
+            .unwrap()
+            .success());
     }
 
     #[test]
@@ -507,7 +594,8 @@ mod tests {
             std::fs::set_permissions(home.join("env"), std::fs::Permissions::from_mode(0o644)).unwrap();
             std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
-        std::fs::write(home.join("config.toml"), concat!("[provider]\n# key sk", "-proj-abcdefghij0123456789\n")).unwrap();
+        std::fs::write(home.join("config.toml"), concat!("[provider]\n# key sk", "-proj-abcdefghij0123456789\n"))
+            .unwrap();
         cfg.tools.shell_allow.extend(["bash".into(), "rm".into(), "systemctl".into(), "docker ps".into()]);
         cfg.tools.write_roots = vec!["/".into()];
         std::env::set_var("PAGURUS_TEST_DOC_KEY", "k");

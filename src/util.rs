@@ -90,9 +90,28 @@ fn secret_values() -> Vec<String> {
 /// GitHub/GitLab/Slack/AWS/Google/Hugging Face/Stripe tokens.
 fn token_shaped(t: &str) -> bool {
     const PREFIXES: &[(&str, usize)] = &[
-        ("sk-", 20), ("ghp_", 30), ("gho_", 30), ("ghu_", 30), ("ghs_", 30), ("ghr_", 30), ("github_pat_", 30),
-        ("glpat-", 20), ("xoxb-", 20), ("xoxp-", 20), ("xoxa-", 20), ("xoxr-", 20), ("xoxs-", 20), ("xapp-", 20), ("AIza", 35),
-        ("hf_", 30), ("gsk_", 40), ("sk_live_", 20), ("rk_live_", 20), ("pk_live_", 20), ("AKIA", 20), ("ASIA", 20),
+        ("sk-", 20),
+        ("ghp_", 30),
+        ("gho_", 30),
+        ("ghu_", 30),
+        ("ghs_", 30),
+        ("ghr_", 30),
+        ("github_pat_", 30),
+        ("glpat-", 20),
+        ("xoxb-", 20),
+        ("xoxp-", 20),
+        ("xoxa-", 20),
+        ("xoxr-", 20),
+        ("xoxs-", 20),
+        ("xapp-", 20),
+        ("AIza", 35),
+        ("hf_", 30),
+        ("gsk_", 40),
+        ("sk_live_", 20),
+        ("rk_live_", 20),
+        ("pk_live_", 20),
+        ("AKIA", 20),
+        ("ASIA", 20),
     ];
     PREFIXES.iter().any(|(p, n)| t.len() >= *n && t.starts_with(p) && t[p.len()..].chars().any(|c| c.is_ascii_digit()))
 }
@@ -110,7 +129,9 @@ pub fn redact(s: &str) -> String {
     // PEM private keys
     while let Some(i) = out.find("-----BEGIN") {
         let Some(k) = out[i..].find("PRIVATE KEY-----") else { break };
-        let end = out[i + k..].find("-----END").and_then(|e| out[i + k + e + 8..].find("-----").map(|f| i + k + e + 8 + f + 5));
+        let end = out[i + k..]
+            .find("-----END")
+            .and_then(|e| out[i + k + e + 8..].find("-----").map(|f| i + k + e + 8 + f + 5));
         out.replace_range(i..end.unwrap_or(out.len()), "[REDACTED PRIVATE KEY]");
     }
     let tok = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-';
@@ -123,10 +144,14 @@ pub fn redact(s: &str) -> String {
         let word = &rest[..end];
         // Telegram bot tokens: 123456789:AA… (35 chars after the colon)
         let after = &rest[end..];
-        let bot = word.len() >= 6 && word.len() <= 12 && word.bytes().all(|b| b.is_ascii_digit()) && after.starts_with(':') && {
-            let n = after[1..].find(|c| !tok(c)).unwrap_or(after.len() - 1);
-            n >= 30
-        };
+        let bot = word.len() >= 6
+            && word.len() <= 12
+            && word.bytes().all(|b| b.is_ascii_digit())
+            && after.starts_with(':')
+            && {
+                let n = after[1..].find(|c| !tok(c)).unwrap_or(after.len() - 1);
+                n >= 30
+            };
         if bot {
             let n = 1 + after[1..].find(|c| !tok(c)).unwrap_or(after.len() - 1);
             res.push_str("[REDACTED]");
@@ -222,7 +247,8 @@ pub fn version() -> &'static str {
     static V: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     V.get_or_init(|| {
         let kind = if cfg!(feature = "art") { "uge" } else { "smol" };
-        let parts: Vec<&str> = [kind, env!("PAGURUS_COMMIT"), env!("PAGURUS_DATE")].into_iter().filter(|s| !s.is_empty()).collect();
+        let parts: Vec<&str> =
+            [kind, env!("PAGURUS_COMMIT"), env!("PAGURUS_DATE")].into_iter().filter(|s| !s.is_empty()).collect();
         format!("{} ({})", env!("CARGO_PKG_VERSION"), parts.join(", "))
     })
 }
@@ -480,14 +506,21 @@ mod tests {
         std::env::set_var("PAGURUS_TEST_API_KEY", "abcdefghijklmnopqrstuv");
         // fake, test-only values, split so no complete key-shaped string sits in the source
         let s = concat!(
-            "key=abcdefghijklmnopqrstuv openai sk", "-proj-Abc123def456ghi789jkl gh gh", "p_0123456789ZYXWVUTSRQPONMLKJIHGFEDCBA ",
-            "bot 123456789:A", "AFakeFakeFakeFakeFakeFakeFakeFake12/getMe aws AKI", "AFAKE0EXAMPLE00000 ok sk-learn plain words 12:30"
+            "key=abcdefghijklmnopqrstuv openai sk",
+            "-proj-Abc123def456ghi789jkl gh gh",
+            "p_0123456789ZYXWVUTSRQPONMLKJIHGFEDCBA ",
+            "bot 123456789:A",
+            "AFakeFakeFakeFakeFakeFakeFakeFake12/getMe aws AKI",
+            "AFAKE0EXAMPLE00000 ok sk-learn plain words 12:30"
         );
         let r = redact(s);
         for leaked in ["abcdefghijklmnopqrstuv", "sk-proj-Abc", "ghp_0123", "AAFakeFa", "AKIAFAKE"] {
             assert!(!r.contains(leaked), "{leaked} leaked: {r}");
         }
-        assert!(r.contains("/getMe") && r.contains("sk-learn plain words 12:30") && r.starts_with("key=[REDACTED]"), "{r}");
+        assert!(
+            r.contains("/getMe") && r.contains("sk-learn plain words 12:30") && r.starts_with("key=[REDACTED]"),
+            "{r}"
+        );
         let pem = "a\n-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXk\n-----END OPENSSH PRIVATE KEY-----\nz";
         assert_eq!(redact(pem), "a\n[REDACTED PRIVATE KEY]\nz");
         assert_eq!(redact("-----BEGIN RSA PRIVATE KEY-----\nMIIE"), "[REDACTED PRIVATE KEY]");

@@ -27,13 +27,21 @@ fn color() -> bool {
 
 /// Wrap `s` in an SGR style (`1` bold, `2` dim, `36` cyan, `31` red …) unless NO_COLOR.
 pub fn style(code: &str, s: &str) -> String {
-    if color() { format!("\x1b[{code}m{s}\x1b[0m") } else { s.to_string() }
+    if color() {
+        format!("\x1b[{code}m{s}\x1b[0m")
+    } else {
+        s.to_string()
+    }
 }
 
 pub fn width() -> usize {
     let mut ws: libc::winsize = unsafe { std::mem::zeroed() };
     let ok = unsafe { libc::ioctl(1, libc::TIOCGWINSZ, &mut ws) } == 0;
-    if ok && ws.ws_col > 10 { ws.ws_col as usize } else { 80 }
+    if ok && ws.ws_col > 10 {
+        ws.ws_col as usize
+    } else {
+        80
+    }
 }
 
 /// Raw input mode for the line editor; the old mode comes back on drop.
@@ -138,10 +146,7 @@ pub enum Input {
 impl Editor {
     pub fn new(home: &Path, commands: Vec<&'static str>) -> Editor {
         let file = home.join("history");
-        let history = crate::util::read(&file)
-            .lines()
-            .filter_map(|l| serde_json::from_str::<String>(l).ok())
-            .collect();
+        let history = crate::util::read(&file).lines().filter_map(|l| serde_json::from_str::<String>(l).ok()).collect();
         Editor { history, file, commands }
     }
 
@@ -535,7 +540,9 @@ impl Md {
             self.head.push(c);
             let trimmed = self.head.trim_start();
             // enough of the line to know what it is
-            if trimmed.len() >= 4 || (!trimmed.is_empty() && !"#-*`>0123456789".contains(trimmed.chars().next().unwrap_or(' '))) {
+            if trimmed.len() >= 4
+                || (!trimmed.is_empty() && !"#-*`>0123456789".contains(trimmed.chars().next().unwrap_or(' ')))
+            {
                 let h = std::mem::take(&mut self.head);
                 self.line_start(&h, out);
             }
@@ -625,7 +632,12 @@ pub fn tool_start(name: &str, args: &str, parallel: bool) {
     let shown = tool_summary(name, args);
     let w = width().saturating_sub(6);
     let line = crate::util::one_line(&shown, w);
-    eprintln!("{} {}{}", style("36", "⏺"), style("1", name), if line.is_empty() { String::new() } else { format!(" {}", style("2", &line)) });
+    eprintln!(
+        "{} {}{}",
+        style("36", "⏺"),
+        style("1", name),
+        if line.is_empty() { String::new() } else { format!(" {}", style("2", &line)) }
+    );
     let _ = parallel;
 }
 
@@ -637,7 +649,11 @@ fn tool_summary(name: &str, args: &str) -> String {
     }
     for k in ["command", "path", "pattern", "query", "url", "task", "name", "action", "what", "question"] {
         if let Some(s) = v[k].as_str() {
-            let extra = if name == "shell" { v["host"].as_str().map(|h| format!("  (on {h})")).unwrap_or_default() } else { String::new() };
+            let extra = if name == "shell" {
+                v["host"].as_str().map(|h| format!("  (on {h})")).unwrap_or_default()
+            } else {
+                String::new()
+            };
             return format!("{s}{extra}");
         }
     }
@@ -645,7 +661,8 @@ fn tool_summary(name: &str, args: &str) -> String {
 }
 
 pub fn tool_done(out: &str, secs: f64) {
-    let failed = out.starts_with("error") || out.contains("blocked by pagurus's safety floor") || out.starts_with("not run");
+    let failed =
+        out.starts_with("error") || out.contains("blocked by pagurus's safety floor") || out.starts_with("not run");
     let first = out.lines().find(|l| !l.trim().is_empty()).unwrap_or("");
     let n = out.lines().count();
     let summary = if failed {

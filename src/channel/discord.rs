@@ -59,7 +59,8 @@ pub struct Discord {
 
 impl Discord {
     pub fn new(c: &DiscordCfg) -> Result<Self, String> {
-        let token = std::env::var(&c.token_env).map_err(|_| format!("discord enabled but ${} is not set", c.token_env))?;
+        let token =
+            std::env::var(&c.token_env).map_err(|_| format!("discord enabled but ${} is not set", c.token_env))?;
         if c.allowed_user_ids.is_empty() || c.allowed_user_ids.contains(&0) {
             return Err("discord.allowed_user_ids is empty or contains 0 — refusing to answer strangers".into());
         }
@@ -79,10 +80,10 @@ impl Discord {
     }
 
     fn post(&self, path: &str) -> ureq::Request {
-        self.http
-            .post(&format!("{API}{path}"))
-            .set("Authorization", &format!("Bot {}", self.token))
-            .set("User-Agent", concat!("DiscordBot (https://github.com/0xjivinci/pagurus, ", env!("CARGO_PKG_VERSION"), ")"))
+        self.http.post(&format!("{API}{path}")).set("Authorization", &format!("Bot {}", self.token)).set(
+            "User-Agent",
+            concat!("DiscordBot (https://github.com/0xjivinci/pagurus, ", env!("CARGO_PKG_VERSION"), ")"),
+        )
     }
 
     /// "@<user id>" is a person (their DM channel is opened on first use); anything else a channel id.
@@ -91,8 +92,12 @@ impl Discord {
         if let Some(c) = self.dms.lock().ok().and_then(|m| m.get(user).cloned()) {
             return Ok(c);
         }
-        let v: Value =
-            self.post("/users/@me/channels").send_json(json!({ "recipient_id": user })).map_err(|e| self.redact(e))?.into_json().map_err(|e| self.redact(e))?;
+        let v: Value = self
+            .post("/users/@me/channels")
+            .send_json(json!({ "recipient_id": user }))
+            .map_err(|e| self.redact(e))?
+            .into_json()
+            .map_err(|e| self.redact(e))?;
         let id = v["id"].as_str().ok_or("Discord didn't open a DM")?.to_string();
         if let Ok(mut m) = self.dms.lock() {
             m.insert(user.to_string(), id.clone());
@@ -108,7 +113,8 @@ impl Discord {
     fn connect(&self, g: &mut Gateway) -> Result<(), String> {
         let resume = !g.session.is_empty() && g.seq.is_some() && !g.resume_url.is_empty();
         let base = if resume { g.resume_url.clone() } else { GATEWAY.to_string() };
-        let mut w = ws::connect(&format!("{}/?v=10&encoding=json", base.trim_end_matches('/')), Duration::from_secs(1))?;
+        let mut w =
+            ws::connect(&format!("{}/?v=10&encoding=json", base.trim_end_matches('/')), Duration::from_secs(1))?;
         let deadline = Instant::now() + Duration::from_secs(30);
         let hello = loop {
             match w.read().map_err(|e| format!("discord gateway: {e}"))? {
@@ -118,7 +124,10 @@ impl Discord {
                 None => {}
             }
         };
-        let ms = hello["d"]["heartbeat_interval"].as_u64().filter(|_| hello["op"] == 10).ok_or("discord gateway: expected hello")?;
+        let ms = hello["d"]["heartbeat_interval"]
+            .as_u64()
+            .filter(|_| hello["op"] == 10)
+            .ok_or("discord gateway: expected hello")?;
         g.interval = Duration::from_millis(ms.max(1000));
         // first beat after interval * jitter, as Discord asks
         g.next_beat = Some(Instant::now() + g.interval.mul_f64((super::random_u64() % 1000) as f64 / 1000.0));
@@ -137,7 +146,9 @@ impl Discord {
 fn close_reason(code: u16) -> String {
     match code {
         4004 => "Discord rejected the bot token (4004): check discord.token_env".into(),
-        4013 | 4014 => format!("Discord refused the intents ({code}): enable MESSAGE CONTENT INTENT for the bot in the developer portal"),
+        4013 | 4014 => format!(
+            "Discord refused the intents ({code}): enable MESSAGE CONTENT INTENT for the bot in the developer portal"
+        ),
         c => format!("discord gateway closed ({c})"),
     }
 }
@@ -230,7 +241,10 @@ impl Channel for Discord {
                                     g.session = d["session_id"].as_str().unwrap_or("").to_string();
                                     g.resume_url = d["resume_gateway_url"].as_str().unwrap_or("").to_string();
                                     g.me = d["user"]["id"].as_str().unwrap_or("").to_string();
-                                    eprintln!("pagurus: discord connected as {}", d["user"]["username"].as_str().unwrap_or("?"));
+                                    eprintln!(
+                                        "pagurus: discord connected as {}",
+                                        d["user"]["username"].as_str().unwrap_or("?")
+                                    );
                                 }
                                 "MESSAGE_CREATE" => out.extend(parse_message(d, &g.me, &self.allowed, &self.channels)),
                                 _ => {}
@@ -290,8 +304,15 @@ impl Channel for Discord {
             return Err("over Discord's 10 MB upload limit".into());
         }
         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("file").replace(['"', '\r', '\n'], "");
-        let payload = json!({ "content": super::chunks(caption, 1900)[0], "allowed_mentions": { "parse": [] } }).to_string();
-        let (ct, body) = crate::voice::multipart(&[("payload_json", &payload)], "files[0]", &name, "application/octet-stream", &bytes);
+        let payload =
+            json!({ "content": super::chunks(caption, 1900)[0], "allowed_mentions": { "parse": [] } }).to_string();
+        let (ct, body) = crate::voice::multipart(
+            &[("payload_json", &payload)],
+            "files[0]",
+            &name,
+            "application/octet-stream",
+            &bytes,
+        );
         self.post(&format!("/channels/{ch}/messages"))
             .timeout(Duration::from_secs(120))
             .set("Content-Type", &ct)
@@ -338,20 +359,38 @@ mod tests {
             json!({ "id": "1", "channel_id": "c1", "guild_id": guild, "author": { "id": author },
                     "content": content, "mentions": mentions, "attachments": [] })
         };
-        assert_eq!(parse_message(&msg("111", None, "hi", json!([])), me, &allowed, &[]), Some(("c1".into(), "hi".into(), None)), "DM");
+        assert_eq!(
+            parse_message(&msg("111", None, "hi", json!([])), me, &allowed, &[]),
+            Some(("c1".into(), "hi".into(), None)),
+            "DM"
+        );
         assert_eq!(parse_message(&msg("222", None, "hi", json!([])), me, &allowed, &[]), None, "stranger's DM");
-        assert_eq!(parse_message(&msg("111", Some("g"), "hi all", json!([])), me, &allowed, &[]), None, "server chatter");
+        assert_eq!(
+            parse_message(&msg("111", Some("g"), "hi all", json!([])), me, &allowed, &[]),
+            None,
+            "server chatter"
+        );
         let m = msg("111", Some("g"), "<@999> /yes", json!([{ "id": "999" }]));
         assert_eq!(parse_message(&m, me, &allowed, &[]).unwrap().1, "/yes", "mention stripped");
-        assert_eq!(parse_message(&msg("222", Some("g"), "<@999> rm -rf", json!([{ "id": "999" }])), me, &allowed, &[]), None);
-        assert!(parse_message(&msg("111", Some("g"), "hi", json!([])), me, &allowed, &["c1".into()]).is_some(), "listed channel");
+        assert_eq!(
+            parse_message(&msg("222", Some("g"), "<@999> rm -rf", json!([{ "id": "999" }])), me, &allowed, &[]),
+            None
+        );
+        assert!(
+            parse_message(&msg("111", Some("g"), "hi", json!([])), me, &allowed, &["c1".into()]).is_some(),
+            "listed channel"
+        );
         let mut bot = msg("111", None, "hi", json!([]));
         bot["author"]["bot"] = json!(true);
         assert_eq!(parse_message(&bot, me, &allowed, &[]), None, "bots are ignored");
         assert_eq!(parse_message(&msg("999", None, "echo", json!([])), me, &allowed, &[]), None, "own messages");
         let mut img = msg("111", None, "", json!([]));
-        img["attachments"] = json!([{ "url": "https://cdn.discordapp.com/a.png", "content_type": "image/png", "size": 1000 }]);
-        assert_eq!(parse_message(&img, me, &allowed, &[]).unwrap().2.as_deref(), Some("https://cdn.discordapp.com/a.png"));
+        img["attachments"] =
+            json!([{ "url": "https://cdn.discordapp.com/a.png", "content_type": "image/png", "size": 1000 }]);
+        assert_eq!(
+            parse_message(&img, me, &allowed, &[]).unwrap().2.as_deref(),
+            Some("https://cdn.discordapp.com/a.png")
+        );
     }
 
     #[test]

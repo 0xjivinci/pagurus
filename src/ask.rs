@@ -29,11 +29,17 @@ pub fn clarify(interactive: bool, question: &str, options: &[String]) -> Result<
     if q.is_empty() {
         return Err("question is empty".into());
     }
-    let options: Vec<String> = options.iter().map(|o| crate::util::one_line(o, 60)).filter(|o| !o.is_empty()).take(6).collect();
+    let options: Vec<String> =
+        options.iter().map(|o| crate::util::one_line(o, 60)).filter(|o| !o.is_empty()).take(6).collect();
     let answer = match ASKER.with(|x| x.borrow().as_ref().map(|ask| ask(q, &options))) {
         Some(a) => a,
         None if interactive => terminal(q, &options),
-        None => return Err("nobody can answer right now (unattended run); decide sensibly yourself and say what you assumed".into()),
+        None => {
+            return Err(
+                "nobody can answer right now (unattended run); decide sensibly yourself and say what you assumed"
+                    .into(),
+            )
+        }
     };
     match answer {
         Some(a) if !a.trim().is_empty() => Ok(format!("the user answered: {}", a.trim())),

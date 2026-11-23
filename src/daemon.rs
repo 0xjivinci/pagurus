@@ -5,8 +5,8 @@
 //! at a time. So pagurus stays responsive while it thinks, and `/stop` works.
 
 use crate::agent::Agent;
-use crate::config::{Config, TelegramCfg};
 use crate::channel::{self, Channels};
+use crate::config::{Config, TelegramCfg};
 use crate::learn;
 use crate::tasks;
 use crate::util::{fmt_time, now, read};
@@ -14,8 +14,8 @@ use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI64, Ordering};
-use std::sync::Arc;
 use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::Arc;
 use std::time::Duration;
 
 const APPROVAL_SECS: u64 = 120;
@@ -51,7 +51,13 @@ mod auth_tests {
         assert!(!super::accepted(&allowed, &msg(222, "private", 222)), "stranger");
         assert!(super::accepted(&allowed, &msg(-100500, "supergroup", 111)), "owner in an allowed group");
         assert!(!super::accepted(&allowed, &msg(-100500, "supergroup", 333)), "other group member");
-        assert!(!super::accepted(&allowed, &json!({"chat": {"id": -100500, "type": "group"}, "sender_chat": {"id": -100500}})), "anonymous admin");
+        assert!(
+            !super::accepted(
+                &allowed,
+                &json!({"chat": {"id": -100500, "type": "group"}, "sender_chat": {"id": -100500}})
+            ),
+            "anonymous admin"
+        );
         assert!(!super::accepted(&[0], &json!({"text": "no chat"})));
         let bot = json!({"chat": {"id": -100500, "type": "group"}, "from": {"id": 111, "is_bot": true}});
         assert!(!super::accepted(&allowed, &bot));
@@ -60,17 +66,13 @@ mod auth_tests {
 
 impl Telegram {
     fn new(c: &TelegramCfg) -> Result<Self, String> {
-        let token = std::env::var(&c.token_env).map_err(|_| format!("telegram enabled but ${} is not set", c.token_env))?;
+        let token =
+            std::env::var(&c.token_env).map_err(|_| format!("telegram enabled but ${} is not set", c.token_env))?;
         if c.allowed_chat_ids.is_empty() || c.allowed_chat_ids.contains(&0) {
             return Err("telegram.allowed_chat_ids is empty or contains 0 — refusing to answer strangers".into());
         }
         let http = ureq::AgentBuilder::new().timeout_connect(Duration::from_secs(15)).build();
-        Ok(Self {
-            http,
-            token,
-            allowed: c.allowed_chat_ids.clone(),
-            offset: AtomicI64::new(0),
-        })
+        Ok(Self { http, token, allowed: c.allowed_chat_ids.clone(), offset: AtomicI64::new(0) })
     }
 
     fn url(&self, method: &str) -> String {
@@ -84,8 +86,11 @@ impl Telegram {
 
     /// New messages: (chat, text or caption, file id of an attached image).
     fn poll(&self, wait: u64) -> Result<Vec<(i64, String, Option<String>)>, String> {
-        let url =
-            format!("{}?timeout={wait}&offset={}&allowed_updates=%5B%22message%22%5D", self.url("getUpdates"), self.offset.load(Ordering::Relaxed));
+        let url = format!(
+            "{}?timeout={wait}&offset={}&allowed_updates=%5B%22message%22%5D",
+            self.url("getUpdates"),
+            self.offset.load(Ordering::Relaxed)
+        );
         let v: Value = self
             .http
             .get(&url)
@@ -182,7 +187,9 @@ impl Telegram {
         let boundary = format!("pagurus{}", crate::util::new_id());
         let mut body = Vec::with_capacity(bytes.len() + 512);
         let mut field_text = |k: &str, v: &str| {
-            body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n").as_bytes());
+            body.extend_from_slice(
+                format!("--{boundary}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n").as_bytes(),
+            );
         };
         field_text("chat_id", &chat.to_string());
         if !caption.is_empty() {
@@ -209,8 +216,15 @@ impl Telegram {
 
     /// A spoken reply (OGG/Opus) as a Telegram voice note.
     fn send_voice(&self, chat: i64, ogg: &[u8]) {
-        let (ct, body) = crate::voice::multipart(&[("chat_id", &chat.to_string())], "voice", "reply.ogg", "audio/ogg", ogg);
-        if let Err(e) = self.http.post(&self.url("sendVoice")).timeout(Duration::from_secs(60)).set("Content-Type", &ct).send_bytes(&body) {
+        let (ct, body) =
+            crate::voice::multipart(&[("chat_id", &chat.to_string())], "voice", "reply.ogg", "audio/ogg", ogg);
+        if let Err(e) = self
+            .http
+            .post(&self.url("sendVoice"))
+            .timeout(Duration::from_secs(60))
+            .set("Content-Type", &ct)
+            .send_bytes(&body)
+        {
             eprintln!("pagurus: telegram voice upload failed: {}", self.redact(e));
         }
     }
@@ -347,7 +361,6 @@ fn take_lock(home: &Path) -> Result<(), String> {
     crate::util::write_atomic(&lock, &std::process::id().to_string())
 }
 
-
 /// The photo size to send to a model: Telegram keeps several, so pick the largest
 /// whose long side is at most 1600 px (enough detail, a fraction of the tokens).
 /// Images sent "as file" (documents) count too.
@@ -358,7 +371,8 @@ fn best_photo(m: &Value) -> Option<String> {
         return pick["file_id"].as_str().map(String::from);
     }
     let d = &m["document"];
-    let image = d["mime_type"].as_str().is_some_and(|t| matches!(t, "image/png" | "image/jpeg" | "image/webp" | "image/gif"));
+    let image =
+        d["mime_type"].as_str().is_some_and(|t| matches!(t, "image/png" | "image/jpeg" | "image/webp" | "image/gif"));
     let small = d["file_size"].as_u64().unwrap_or(u64::MAX) <= crate::util::MAX_IMAGE_BYTES as u64;
     (image && small).then(|| d["file_id"].as_str().map(String::from)).flatten()
 }
@@ -366,13 +380,34 @@ fn best_photo(m: &Value) -> Option<String> {
 // ---------- worker: everything slow runs here, one job at a time ----------
 
 enum Job {
-    Turn { chat: i64, agent: Box<Agent>, text: String, images: Vec<String> },
-    Review { chat: i64, agent: Box<Agent>, keep: bool },
-    Heartbeat { key: String, due: Vec<String>, once: Vec<String>, previous: Option<(u64, String)> },
-    Tidy { chat: Option<i64>, force: bool },
-    Curate { chat: Option<i64> },
+    Turn {
+        chat: i64,
+        agent: Box<Agent>,
+        text: String,
+        images: Vec<String>,
+    },
+    Review {
+        chat: i64,
+        agent: Box<Agent>,
+        keep: bool,
+    },
+    Heartbeat {
+        key: String,
+        due: Vec<String>,
+        once: Vec<String>,
+        previous: Option<(u64, String)>,
+    },
+    Tidy {
+        chat: Option<i64>,
+        force: bool,
+    },
+    Curate {
+        chat: Option<i64>,
+    },
     /// Threshold checks: (task text, check, previous state). No model involved.
-    Checks { items: Vec<(String, tasks::Check, u8)> },
+    Checks {
+        items: Vec<(String, tasks::Check, u8)>,
+    },
     /// The user switched models.
     Reconfigure(Box<Config>),
 }
@@ -385,25 +420,56 @@ const BROKEN: u8 = 3;
 
 enum Event {
     /// The answer, sent as soon as it exists (reflection runs after it).
-    Reply { chat: i64, text: String },
+    Reply {
+        chat: i64,
+        text: String,
+    },
     /// The turn is fully done (reflection included); `note` says what was learned.
-    TurnDone { chat: i64, agent: Box<Agent>, note: String },
+    TurnDone {
+        chat: i64,
+        agent: Box<Agent>,
+        note: String,
+    },
     /// From the Telegram thread: new messages, or an empty poll (network fine).
     Messages(Vec<(i64, String, Option<String>)>),
     Polled,
-    Reviewed { chat: i64, agent: Option<Box<Agent>>, note: Option<String> },
-    Heartbeat { key: String, once: Vec<String>, msg: Option<String> },
-    Tidied { chat: Option<i64>, result: Result<String, String> },
+    Reviewed {
+        chat: i64,
+        agent: Option<Box<Agent>>,
+        note: Option<String>,
+    },
+    Heartbeat {
+        key: String,
+        once: Vec<String>,
+        msg: Option<String>,
+    },
+    Tidied {
+        chat: Option<i64>,
+        result: Result<String, String>,
+    },
     /// (task text, new state, message for the user if the state changed)
-    Checked { results: Vec<(String, u8, Option<String>)> },
+    Checked {
+        results: Vec<(String, u8, Option<String>)>,
+    },
     /// The running turn wants a command approved; answer on the sender.
-    Approval { chat: i64, cmd: String, answer: Sender<bool> },
+    Approval {
+        chat: i64,
+        cmd: String,
+        answer: Sender<bool>,
+    },
     /// The running turn asks the user a question (`clarify`); the answer goes through `ask::answer`.
-    Ask { chat: i64, text: String, options: Vec<String> },
+    Ask {
+        chat: i64,
+        text: String,
+        options: Vec<String>,
+    },
     /// Background work (board tasks, peer requests): tell the owner.
     Notice(String),
     /// Background work wants a command approved by the owner (never covered by /all).
-    BgApproval { cmd: String, answer: Sender<bool> },
+    BgApproval {
+        cmd: String,
+        answer: Sender<bool>,
+    },
 }
 
 fn worker(home: PathBuf, mut cfg: Config, jobs: Receiver<Job>, events: Sender<Event>) {
@@ -460,10 +526,9 @@ fn worker(home: PathBuf, mut cfg: Config, jobs: Receiver<Job>, events: Sender<Ev
             Job::Checks { items } => Event::Checked {
                 results: items.into_iter().map(|(text, c, before)| run_check(&home, &cfg, text, &c, before)).collect(),
             },
-            Job::Curate { chat } => Event::Tidied {
-                chat,
-                result: crate::agent::curate(&home, &cfg).map(|r| format!("📚 skills: {r}")),
-            },
+            Job::Curate { chat } => {
+                Event::Tidied { chat, result: crate::agent::curate(&home, &cfg).map(|r| format!("📚 skills: {r}")) }
+            }
             Job::Reconfigure(c) => {
                 cfg = *c;
                 continue;
@@ -485,7 +550,9 @@ fn run_check(home: &Path, cfg: &Config, text: String, c: &tasks::Check, before: 
         Ok(out) => match tasks::first_number(&out) {
             Some(v) if c.tripped(v) => (TRIPPED, format!("⚠️ {name}: {v} (alert when {} {})", c.op, c.limit)),
             // still near the line after an alert: stay alerted, say nothing
-            Some(_) if before == TRIPPED && !c.recovered(tasks::first_number(&out).unwrap_or(0.0)) => (TRIPPED, String::new()),
+            Some(_) if before == TRIPPED && !c.recovered(tasks::first_number(&out).unwrap_or(0.0)) => {
+                (TRIPPED, String::new())
+            }
             Some(v) => (FINE, format!("✅ back to normal — {name}: {v}")),
             None => (BROKEN, format!("⚠️ check {name} printed no number: {}", crate::util::one_line(&out, 160))),
         },
@@ -665,8 +732,12 @@ impl Daemon {
                 self.inflight -= 1;
                 match (chat, result) {
                     (Some(c), r) => self.say(c, &r.unwrap_or_else(|e| e)),
-                    (None, Ok(msg)) if msg.contains('→') => self.say(self.owner(), &format!("🧹 tidied memory: {msg} (/learn)")),
-                    (None, Ok(msg)) if msg.starts_with("📚") && !msg.contains("nothing to curate") => self.say(self.owner(), &msg),
+                    (None, Ok(msg)) if msg.contains('→') => {
+                        self.say(self.owner(), &format!("🧹 tidied memory: {msg} (/learn)"))
+                    }
+                    (None, Ok(msg)) if msg.starts_with("📚") && !msg.contains("nothing to curate") => {
+                        self.say(self.owner(), &msg)
+                    }
                     (None, Ok(_)) => {}
                     (None, Err(e)) => eprintln!("pagurus: tidy skipped: {e}"),
                 }
@@ -751,7 +822,13 @@ impl Daemon {
     }
 
     fn give_back(&mut self, chat: i64, agent: Box<Agent>) {
-        let c = self.chats.entry(chat).or_insert_with(|| Chat { agent: None, last: now(), queue: VecDeque::new(), typing: false, inbox: Default::default() });
+        let c = self.chats.entry(chat).or_insert_with(|| Chat {
+            agent: None,
+            last: now(),
+            queue: VecDeque::new(),
+            typing: false,
+            inbox: Default::default(),
+        });
         c.agent = Some(agent);
         c.typing = false;
         if let Some((next, images)) = c.queue.pop_front() {
@@ -774,7 +851,8 @@ impl Daemon {
 
     fn health(&self) -> String {
         let up = now().saturating_sub(self.started);
-        let busy: Vec<String> = self.chats.iter().filter(|(_, c)| c.agent.is_none()).map(|(id, _)| channel::qualified(*id)).collect();
+        let busy: Vec<String> =
+            self.chats.iter().filter(|(_, c)| c.agent.is_none()).map(|(id, _)| channel::qualified(*id)).collect();
         let cooling = crate::llm::cooldowns();
         format!(
             "pagurus {} · up {}h{:02}m · model {}\nworker: {}\ncooling down: {}\nunsent messages: {}\nstanding tasks: {} · learning {} · memory {} KiB",
@@ -1016,7 +1094,9 @@ impl Daemon {
         let quiet: Vec<i64> = self
             .chats
             .iter()
-            .filter(|(_, c)| now().saturating_sub(c.last) >= idle && c.agent.as_ref().is_some_and(|a| a.has_unreviewed()))
+            .filter(|(_, c)| {
+                now().saturating_sub(c.last) >= idle && c.agent.as_ref().is_some_and(|a| a.has_unreviewed())
+            })
             .map(|(id, _)| *id)
             .collect();
         for chat in quiet {
@@ -1050,7 +1130,11 @@ pub fn run(home: PathBuf, cfg: Config) -> Result<(), String> {
             .spawn(move || loop {
                 let ev = match c.receive() {
                     Ok(m) if m.is_empty() => Event::Polled,
-                    Ok(m) => Event::Messages(m.into_iter().map(|(to, text, file)| (channel::handle(&format!("{}:{to}", c.name())), text, file)).collect()),
+                    Ok(m) => Event::Messages(
+                        m.into_iter()
+                            .map(|(to, text, file)| (channel::handle(&format!("{}:{to}", c.name())), text, file))
+                            .collect(),
+                    ),
                     Err(e) => {
                         eprintln!("pagurus: {} receive failed: {e}", c.name());
                         std::thread::sleep(Duration::from_secs(10));
@@ -1087,7 +1171,10 @@ pub fn run(home: PathBuf, cfg: Config) -> Result<(), String> {
         Err(e) => eprintln!("pagurus: art dashboard not started: {e}"),
     }
     if let Some(addr) = crate::peer::serve(home.clone(), cfg.clone(), hooks)? {
-        eprintln!("pagurus: accepting tasks from paired pagurus agents on {addr} as `{}`", crate::peer::self_name(&cfg));
+        eprintln!(
+            "pagurus: accepting tasks from paired pagurus agents on {addr} as `{}`",
+            crate::peer::self_name(&cfg)
+        );
     }
     drop(event_tx);
     let default_every = cfg.daemon.heartbeat_minutes;
@@ -1125,7 +1212,6 @@ pub fn run(home: PathBuf, cfg: Config) -> Result<(), String> {
     let mut saved = (last_tidy, last_curate, next_due.clone());
     let mut last_typing = 0;
     loop {
-
         d.expire_yolo();
         if d.pending.as_ref().is_some_and(|p| now() >= p.deadline) {
             eprintln!("pagurus: approval timed out");
@@ -1181,8 +1267,12 @@ pub fn run(home: PathBuf, cfg: Config) -> Result<(), String> {
                     let before = d.check_state.get(&t.text).copied().unwrap_or(UNKNOWN);
                     checks.push((t.text.clone(), c, before));
                 }
-                None if t.at.is_some() => due.push(format!("(one-off reminder: always message the user about it) {}", t.text)),
-                None if t.cal.is_some() => due.push(format!("(scheduled task: always message the user with the result) {}", t.text)),
+                None if t.at.is_some() => {
+                    due.push(format!("(one-off reminder: always message the user about it) {}", t.text))
+                }
+                None if t.cal.is_some() => {
+                    due.push(format!("(scheduled task: always message the user with the result) {}", t.text))
+                }
                 None => due.push(t.text.clone()),
             }
         }
@@ -1220,21 +1310,28 @@ pub fn run(home: PathBuf, cfg: Config) -> Result<(), String> {
                 }
                 for (chat, mut text, image) in msgs {
                     let mut images = Vec::new();
-                    if let (Some(v), Some(c)) = (image.as_deref().and_then(|i| i.strip_prefix(crate::voice::TAG)), &d.ch) {
+                    if let (Some(v), Some(c)) =
+                        (image.as_deref().and_then(|i| i.strip_prefix(crate::voice::TAG)), &d.ch)
+                    {
                         match c.fetch(chat, v).and_then(|b| crate::voice::transcribe(&d.cfg.voice, &b)) {
                             Ok(heard) => {
                                 crate::voice::heard(chat);
                                 text = format!("{text}\n(voice message, transcribed) {heard}").trim().to_string();
                             }
                             Err(e) => {
-                                d.say(chat, &format!("(couldn't use that voice message: {})", crate::util::one_line(&e, 240)));
+                                d.say(
+                                    chat,
+                                    &format!("(couldn't use that voice message: {})", crate::util::one_line(&e, 240)),
+                                );
                                 continue;
                             }
                         }
                     } else if let (Some(id), Some(c)) = (image, &d.ch) {
                         match c.fetch(chat, &id).and_then(|b| crate::util::image_data_url(&b)) {
                             Ok(url) => images.push(url),
-                            Err(e) => d.say(chat, &format!("(couldn't use that image: {})", crate::util::one_line(&e, 120))),
+                            Err(e) => {
+                                d.say(chat, &format!("(couldn't use that image: {})", crate::util::one_line(&e, 120)))
+                            }
                         }
                     }
                     if let Some(reply) = d.message(chat, &text, images) {
@@ -1254,7 +1351,8 @@ pub fn run(home: PathBuf, cfg: Config) -> Result<(), String> {
                         d.submit(Job::Tidy { chat: None, force: false });
                     }
                     // weekly look at the skill library, and only if there's a library to look at
-                    if now().saturating_sub(last_curate) >= 7 * 86_400 && crate::tools::skill_index(&d.home).len() >= 3 {
+                    if now().saturating_sub(last_curate) >= 7 * 86_400 && crate::tools::skill_index(&d.home).len() >= 3
+                    {
                         last_curate = now();
                         d.submit(Job::Curate { chat: None });
                     }
@@ -1336,7 +1434,10 @@ impl State {
     fn load(home: &Path) -> State {
         let v: serde_json::Value = serde_json::from_str(&read(&Self::path(home))).unwrap_or_default();
         let t = |k: &str| v[k].as_u64().filter(|t| *t > 0 && *t <= now()).unwrap_or_else(now);
-        let next_due = v["next_due"].as_object().map(|m| m.iter().filter_map(|(k, v)| Some((k.clone(), v.as_u64()?))).collect()).unwrap_or_default();
+        let next_due = v["next_due"]
+            .as_object()
+            .map(|m| m.iter().filter_map(|(k, v)| Some((k.clone(), v.as_u64()?))).collect())
+            .unwrap_or_default();
         State { last_tidy: t("last_tidy"), last_curate: t("last_curate"), next_due }
     }
 
@@ -1356,7 +1457,10 @@ mod tests {
     fn daemon_timers_survive_a_restart() {
         let home = std::env::temp_dir().join(format!("pagurus-state-{}", crate::util::new_id()));
         let fresh = super::State::load(&home);
-        assert!(fresh.last_tidy >= crate::util::now() - 5 && fresh.next_due.is_empty(), "first start: timers start now");
+        assert!(
+            fresh.last_tidy >= crate::util::now() - 5 && fresh.next_due.is_empty(),
+            "first start: timers start now"
+        );
         let mut due = std::collections::HashMap::new();
         due.insert("check disk".to_string(), 1_900_000_000u64);
         super::State { last_tidy: 1_000, last_curate: 2_000, next_due: due }.save(&home);

@@ -56,13 +56,28 @@ pub fn root() -> Option<PathBuf> {
     current().map(|p| p.root)
 }
 
-const RULE_FILES: &[&str] = &["AGENTS.md", "CLAUDE.md", ".cursorrules", ".github/copilot-instructions.md", "CONTRIBUTING.md"];
+const RULE_FILES: &[&str] =
+    &["AGENTS.md", "CLAUDE.md", ".cursorrules", ".github/copilot-instructions.md", "CONTRIBUTING.md"];
 const RULES_MAX: usize = 6000;
 
 /// Files that mark a folder as a project (plain `pagurus` started there opens it).
 const MARKERS: &[&str] = &[
-    ".git", "AGENTS.md", "CLAUDE.md", "Cargo.toml", "package.json", "pyproject.toml", "requirements.txt", "setup.py",
-    "go.mod", "Makefile", "CMakeLists.txt", "pom.xml", "build.gradle", "Gemfile", "composer.json", "deno.json",
+    ".git",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "Cargo.toml",
+    "package.json",
+    "pyproject.toml",
+    "requirements.txt",
+    "setup.py",
+    "go.mod",
+    "Makefile",
+    "CMakeLists.txt",
+    "pom.xml",
+    "build.gradle",
+    "Gemfile",
+    "composer.json",
+    "deno.json",
 ];
 
 /// `pagurus` started inside a project folder: open it. None anywhere else.
@@ -71,7 +86,9 @@ pub fn auto_open(home: &Path) -> Option<String> {
     if !MARKERS.iter().any(|m| cwd.join(m).exists()) {
         return None;
     }
-    open(home, &cwd.to_string_lossy()).ok().map(|m| format!("{m}\n(opened because this folder is a project; /project off leaves it)"))
+    open(home, &cwd.to_string_lossy())
+        .ok()
+        .map(|m| format!("{m}\n(opened because this folder is a project; /project off leaves it)"))
 }
 
 /// Open a project folder. Refuses `/`, your home folder itself and pagurus's home.
@@ -103,16 +120,25 @@ pub fn open(home: &Path, arg: &str) -> Result<String, String> {
         .unwrap_or_default();
     let pr = Project { root: root.clone(), git, rules, rules_file: rules_file.clone() };
     set(Some(pr));
-    if let Ok(mut r) = READS.lock() {
-        *r = None;
-    }
+    with_reads(|r| *r = None);
     let checks = detect(&root);
     Ok(format!(
         "Project: {}{}{}\nchecks: {}",
         root.display(),
-        if git { format!(" · git branch {}", git_out(&root, &["rev-parse", "--abbrev-ref", "HEAD"]).unwrap_or_default().trim()) } else { " · not a git repo".into() },
+        if git {
+            format!(
+                " · git branch {}",
+                git_out(&root, &["rev-parse", "--abbrev-ref", "HEAD"]).unwrap_or_default().trim()
+            )
+        } else {
+            " · not a git repo".into()
+        },
         if rules_file.is_empty() { String::new() } else { format!(" · following {rules_file}") },
-        if checks.is_empty() { "none found (pass check a command)".to_string() } else { checks.iter().map(|(k, c)| format!("{k}: {c}")).collect::<Vec<_>>().join(" · ") }
+        if checks.is_empty() {
+            "none found (pass check a command)".to_string()
+        } else {
+            checks.iter().map(|(k, c)| format!("{k}: {c}")).collect::<Vec<_>>().join(" · ")
+        }
     ))
 }
 
@@ -146,7 +172,24 @@ pub fn prompt_section() -> String {
 
 // ---------- fresh reads and per-turn tracking ----------
 
-static READS: Mutex<Option<HashMap<PathBuf, u64>>> = Mutex::new(None);
+type Reads = Option<HashMap<PathBuf, u64>>;
+
+#[cfg(not(test))]
+static READS: Mutex<Reads> = Mutex::new(None);
+
+#[cfg(not(test))]
+fn with_reads<T>(f: impl FnOnce(&mut Reads) -> T) -> T {
+    f(&mut READS.lock().unwrap_or_else(|e| e.into_inner()))
+}
+
+// like PROJECT: one test's open() must not wipe another's reads
+#[cfg(test)]
+thread_local!(static READS: std::cell::RefCell<Reads> = const { std::cell::RefCell::new(None) });
+
+#[cfg(test)]
+fn with_reads<T>(f: impl FnOnce(&mut Reads) -> T) -> T {
+    READS.with(|r| f(&mut r.borrow_mut()))
+}
 
 fn fnv(b: &[u8]) -> u64 {
     b.iter().fold(0xcbf29ce484222325u64, |h, x| (h ^ *x as u64).wrapping_mul(0x100000001b3))
@@ -154,8 +197,8 @@ fn fnv(b: &[u8]) -> u64 {
 
 /// read_file saw this file as it is now.
 pub fn note_read(p: &Path) {
-    if let (Ok(b), Ok(mut r)) = (std::fs::read(p), READS.lock()) {
-        r.get_or_insert_with(HashMap::new).insert(p.to_path_buf(), fnv(&b));
+    if let Ok(b) = std::fs::read(p) {
+        with_reads(|r| r.get_or_insert_with(HashMap::new).insert(p.to_path_buf(), fnv(&b)));
     }
 }
 
@@ -166,7 +209,7 @@ pub fn check_fresh(p: &Path) -> Result<(), String> {
         return Ok(());
     }
     let now = std::fs::read(p).map(|b| fnv(&b)).unwrap_or(0);
-    match READS.lock().ok().and_then(|r| r.as_ref().and_then(|m| m.get(p).copied())) {
+    match with_reads(|r| r.as_ref().and_then(|m| m.get(p).copied())) {
         Some(h) if h == now => Ok(()),
         Some(_) => Err(format!("{} changed since you read it; read_file it again before editing", p.display())),
         None => Err(format!("read {} with read_file before editing it", p.display())),
@@ -211,7 +254,12 @@ pub fn unchecked_note() -> Option<String> {
         return None;
     }
     t.nudged = true;
-    let names: Vec<String> = t.edited.iter().take(5).map(|p| p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()).collect();
+    let names: Vec<String> = t
+        .edited
+        .iter()
+        .take(5)
+        .map(|p| p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default())
+        .collect();
     Some(format!(
         "[pagurus: you changed {} but haven't run `check`. Run it now; if it fails, fix it. Then give your answer.]",
         names.join(", ")
@@ -275,8 +323,12 @@ pub fn run(ctx: &Ctx, name: &str, a: &Value) -> Option<Result<String, String>> {
                 let full = crate::util::expand(path).canonicalize().map_err(|e| format!("{path}: {e}"));
                 match full {
                     Ok(f) if root().as_deref() == Some(f.as_path()) => Ok(format!("{} is already open", f.display())),
-                    Ok(f) => crate::tools::approve(ctx, "in a project pagurus edits files and runs its checks", &format!("open project {}", f.display()))
-                        .and_then(|_| open(ctx.home, &f.to_string_lossy())),
+                    Ok(f) => crate::tools::approve(
+                        ctx,
+                        "in a project pagurus edits files and runs its checks",
+                        &format!("open project {}", f.display()),
+                    )
+                    .and_then(|_| open(ctx.home, &f.to_string_lossy())),
                     Err(e) => Err(e),
                 }
             }
@@ -286,7 +338,9 @@ pub fn run(ctx: &Ctx, name: &str, a: &Value) -> Option<Result<String, String>> {
     if !matches!(name, "grep" | "glob" | "check" | "git") {
         return None;
     }
-    let Some(p) = current() else { return Some(Err(format!("{name} works in a project: open one with the project tool (the user approves)"))) };
+    let Some(p) = current() else {
+        return Some(Err(format!("{name} works in a project: open one with the project tool (the user approves)")));
+    };
     Some(match name {
         "grep" => grep(ctx, &p.root, a),
         "glob" => glob(&p.root, a["pattern"].as_str().unwrap_or("")),
@@ -295,7 +349,21 @@ pub fn run(ctx: &Ctx, name: &str, a: &Value) -> Option<Result<String, String>> {
     })
 }
 
-const SKIP_DIRS: &[&str] = &[".git", "node_modules", "target", ".venv", "venv", "__pycache__", "dist", "build", ".next", ".cache", "vendor", ".idea", ".tox"];
+const SKIP_DIRS: &[&str] = &[
+    ".git",
+    "node_modules",
+    "target",
+    ".venv",
+    "venv",
+    "__pycache__",
+    "dist",
+    "build",
+    ".next",
+    ".cache",
+    "vendor",
+    ".idea",
+    ".tox",
+];
 
 fn under_root(root: &Path, p: &str) -> Result<PathBuf, String> {
     if p.is_empty() || p == "." {
@@ -303,7 +371,11 @@ fn under_root(root: &Path, p: &str) -> Result<PathBuf, String> {
     }
     let full = if Path::new(p).is_absolute() { PathBuf::from(p) } else { root.join(p) };
     let c = full.canonicalize().map_err(|e| format!("{p}: {e}"))?;
-    if c.starts_with(root) { Ok(c) } else { Err(format!("{p} is outside the project")) }
+    if c.starts_with(root) {
+        Ok(c)
+    } else {
+        Err(format!("{p} is outside the project"))
+    }
 }
 
 fn grep(ctx: &Ctx, root: &Path, a: &Value) -> Result<String, String> {
@@ -349,7 +421,11 @@ fn grep(ctx: &Ctx, root: &Path, a: &Value) -> Result<String, String> {
         .take(300)
         .collect();
     if lines.is_empty() {
-        return Ok(if out.status.code() == Some(1) || out.status.success() { "no matches".into() } else { format!("search error: {}", String::from_utf8_lossy(&out.stderr).trim()) });
+        return Ok(if out.status.code() == Some(1) || out.status.success() {
+            "no matches".into()
+        } else {
+            format!("search error: {}", String::from_utf8_lossy(&out.stderr).trim())
+        });
     }
     let more = if lines.len() == 300 { "\n[first 300 lines; narrow the pattern, path or glob]" } else { "" };
     Ok(format!("{}{more}", lines.join("\n")))
@@ -417,10 +493,25 @@ pub fn detect(root: &Path) -> Vec<(&'static str, String)> {
         v.push(("lint", "cargo clippy --all-targets".to_string()));
     } else if has("package.json") {
         let pkg: Value = serde_json::from_str(&read(&root.join("package.json"))).unwrap_or_default();
-        let pm = if has("pnpm-lock.yaml") { "pnpm" } else if has("yarn.lock") { "yarn" } else if has("bun.lockb") || has("bun.lock") { "bun" } else { "npm" };
+        let pm = if has("pnpm-lock.yaml") {
+            "pnpm"
+        } else if has("yarn.lock") {
+            "yarn"
+        } else if has("bun.lockb") || has("bun.lock") {
+            "bun"
+        } else {
+            "npm"
+        };
         for (what, script) in [("test", "test"), ("build", "build"), ("lint", "lint")] {
             if pkg["scripts"][script].is_string() {
-                v.push((what, if pm == "npm" && script != "test" { format!("npm run {script}") } else { format!("{pm} {}{script}", if pm == "npm" { "" } else { "run " }) }));
+                v.push((
+                    what,
+                    if pm == "npm" && script != "test" {
+                        format!("npm run {script}")
+                    } else {
+                        format!("{pm} {}{script}", if pm == "npm" { "" } else { "run " })
+                    },
+                ));
             }
         }
     } else if has("go.mod") {
@@ -454,7 +545,11 @@ fn allowed(ctx: &Ctx, cmd: &str, usual: bool) -> Result<(), String> {
         crate::autonomy::audit(ctx.home, "auto", cmd);
         return Ok(());
     }
-    crate::tools::approve(ctx, "it runs the project's code", &format!("{cmd}\n(in {})", root().map(|r| r.display().to_string()).unwrap_or_default()))
+    crate::tools::approve(
+        ctx,
+        "it runs the project's code",
+        &format!("{cmd}\n(in {})", root().map(|r| r.display().to_string()).unwrap_or_default()),
+    )
 }
 
 fn check(ctx: &Ctx, root: &Path, a: &Value) -> Result<String, String> {
@@ -488,9 +583,29 @@ fn check(ctx: &Ctx, root: &Path, a: &Value) -> Result<String, String> {
 fn git_cmd(root: &Path, args: &[&str]) -> Command {
     let mut c = Command::new("git");
     crate::tools::clean_env(&mut c);
-    c.env("GIT_CONFIG_NOSYSTEM", "1").env("GIT_TERMINAL_PROMPT", "0").env("GIT_PAGER", "cat").env("GIT_OPTIONAL_LOCKS", "0");
-    c.args(["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "core.pager=cat", "-c", "diff.external=",
-            "-c", "credential.helper=", "-c", "protocol.allow=never", "-c", "core.sshCommand=false", "-c", "color.ui=false", "-C"]);
+    c.env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_PAGER", "cat")
+        .env("GIT_OPTIONAL_LOCKS", "0");
+    c.args([
+        "-c",
+        "core.hooksPath=/dev/null",
+        "-c",
+        "core.fsmonitor=false",
+        "-c",
+        "core.pager=cat",
+        "-c",
+        "diff.external=",
+        "-c",
+        "credential.helper=",
+        "-c",
+        "protocol.allow=never",
+        "-c",
+        "core.sshCommand=false",
+        "-c",
+        "color.ui=false",
+        "-C",
+    ]);
     c.arg(root).args(args);
     c
 }
@@ -512,7 +627,10 @@ fn git(ctx: &Ctx, p: &Project, a: &Value) -> Result<String, String> {
     let root = &p.root;
     let path = a["path"].as_str().filter(|s| !s.is_empty() && !s.starts_with('-'));
     match a["action"].as_str().unwrap_or("status") {
-        "status" => git_out(root, &["status", "--short", "--branch"]).map(|s| if s.trim().is_empty() { "clean".into() } else { s }),
+        "status" => {
+            git_out(root, &["status", "--short", "--branch"])
+                .map(|s| if s.trim().is_empty() { "clean".into() } else { s })
+        }
         "diff" => {
             let mut args = vec!["diff", "--no-ext-diff", "--no-textconv", "--stat", "--patch"];
             if a["staged"].as_bool() == Some(true) {
@@ -532,16 +650,28 @@ fn git(ctx: &Ctx, p: &Project, a: &Value) -> Result<String, String> {
             if rev.starts_with('-') || rev.contains("..") && rev.len() > 80 {
                 return Err("give a commit like HEAD~1 or a hash".into());
             }
-            git_out(root, &["show", "--no-ext-diff", "--no-textconv", "--stat", "--patch", rev, "--"]).map(|s| clip(&s, 20_000))
+            git_out(root, &["show", "--no-ext-diff", "--no-textconv", "--stat", "--patch", rev, "--"])
+                .map(|s| clip(&s, 20_000))
         }
         "commit" => {
-            let msg = a["message"].as_str().map(str::trim).filter(|m| !m.is_empty()).ok_or("say what the commit does (message)")?;
+            let msg = a["message"]
+                .as_str()
+                .map(str::trim)
+                .filter(|m| !m.is_empty())
+                .ok_or("say what the commit does (message)")?;
             if git_out(root, &["status", "--porcelain"])?.trim().is_empty() {
                 return Ok("nothing to commit".into());
             }
             let branch = git_out(root, &["rev-parse", "--abbrev-ref", "HEAD"])?.trim().to_string();
-            let target = if branch.starts_with("agent/") { branch.clone() } else { format!("agent/{}", crate::util::fmt_local(now()).replace([':', ' '], "-")) };
-            let what = format!("git commit on {target}{}: {msg}", if target == branch { String::new() } else { format!(" (new branch from {branch})") });
+            let target = if branch.starts_with("agent/") {
+                branch.clone()
+            } else {
+                format!("agent/{}", crate::util::fmt_local(now()).replace([':', ' '], "-"))
+            };
+            let what = format!(
+                "git commit on {target}{}: {msg}",
+                if target == branch { String::new() } else { format!(" (new branch from {branch})") }
+            );
             crate::tools::approve(ctx, "it changes the project's git history", &what)?;
             crate::autonomy::audit(ctx.home, "git", &what);
             if target != branch {
@@ -605,7 +735,10 @@ mod tests {
         assert_eq!(root(), proj.canonicalize().ok());
         assert!(run(&ctx, "project", &open_it).unwrap().unwrap().contains("already open"));
         let home_dir = std::env::var("HOME").unwrap();
-        assert!(run(&ctx, "project", &json!({"action":"open","path": home_dir})).unwrap().unwrap_err().contains("not / or your whole home"));
+        assert!(run(&ctx, "project", &json!({"action":"open","path": home_dir}))
+            .unwrap()
+            .unwrap_err()
+            .contains("not / or your whole home"));
         run(&ctx, "project", &json!({"action":"close"})).unwrap().unwrap();
         assert!(root().is_none());
         let _ = std::fs::remove_dir_all(&home);
@@ -622,7 +755,10 @@ mod tests {
     #[test]
     fn diffs_show_only_what_changed() {
         let d = diff("a\nb\nc\nd\ne\n", "a\nb\nX\nd\ne\n");
-        assert!(d.contains("- c\n+ X\n") && d.contains("  b\n") && d.contains("  d\n") && d.starts_with("@@ line 3 @@"), "{d}");
+        assert!(
+            d.contains("- c\n+ X\n") && d.contains("  b\n") && d.contains("  d\n") && d.starts_with("@@ line 3 @@"),
+            "{d}"
+        );
     }
 
     #[test]
@@ -631,7 +767,9 @@ mod tests {
         let proj = std::env::temp_dir().join(format!("pagurus-git-proj-{}", crate::util::new_id()));
         std::fs::create_dir_all(&proj).unwrap();
         std::fs::create_dir_all(home.join("workspace")).unwrap();
-        let g = |args: &[&str]| assert!(Command::new("git").arg("-C").arg(&proj).args(args).output().unwrap().status.success(), "{args:?}");
+        let g = |args: &[&str]| {
+            assert!(Command::new("git").arg("-C").arg(&proj).args(args).output().unwrap().status.success(), "{args:?}")
+        };
         g(&["init", "-q", "-b", "main"]);
         g(&["config", "user.email", "t@example.com"]);
         g(&["config", "user.name", "t"]);

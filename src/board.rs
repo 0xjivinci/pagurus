@@ -122,20 +122,31 @@ impl Board {
         self.tasks.iter_mut().find(|t| t.id == id).ok_or_else(|| format!("no board task #{id}"))
     }
 
-    pub fn create(&mut self, title: &str, body: &str, assignee: &str, parents: &[u32], max_attempts: u32, t: u64) -> Result<u32, String> {
+    pub fn create(
+        &mut self,
+        title: &str,
+        body: &str,
+        assignee: &str,
+        parents: &[u32],
+        max_attempts: u32,
+        t: u64,
+    ) -> Result<u32, String> {
         let title = one_line(title, 160);
         if title.is_empty() {
             return Err("a task needs a title".into());
         }
         if body.chars().count() > 8000 {
-            return Err("body is longer than 8000 characters; put details in a workspace file and mention its path".into());
+            return Err(
+                "body is longer than 8000 characters; put details in a workspace file and mention its path".into()
+            );
         }
         for p in parents {
             self.get(*p)?;
         }
         if self.tasks.len() >= MAX_TASKS {
             // make room: forget the oldest finished tasks
-            let mut done: Vec<(u64, u32)> = self.tasks.iter().filter(|t| !t.status.open()).map(|t| (t.updated, t.id)).collect();
+            let mut done: Vec<(u64, u32)> =
+                self.tasks.iter().filter(|t| !t.status.open()).map(|t| (t.updated, t.id)).collect();
             done.sort();
             let drop: Vec<u32> = done.iter().take(self.tasks.len() + 1 - MAX_TASKS).map(|d| d.1).collect();
             if drop.is_empty() {
@@ -229,15 +240,25 @@ impl Board {
             Outcome::Blocked(why) => {
                 x.status = Status::Blocked;
                 x.comments.push(Comment { t, by: "worker".into(), text: clip(why.trim(), 2000) });
-                notes.push(format!("⛔ board #{id} blocked: {title}\n{}\n(/board unblock {id} when it's sorted)", clip(why.trim(), 800)));
+                notes.push(format!(
+                    "⛔ board #{id} blocked: {title}\n{}\n(/board unblock {id} when it's sorted)",
+                    clip(why.trim(), 800)
+                ));
                 self.breaker.remove(&key);
             }
             Outcome::Failed(e) => {
-                x.comments.push(Comment { t, by: "worker".into(), text: format!("attempt {attempts} failed: {}", clip(e.trim(), 1000)) });
+                x.comments.push(Comment {
+                    t,
+                    by: "worker".into(),
+                    text: format!("attempt {attempts} failed: {}", clip(e.trim(), 1000)),
+                });
                 if attempts >= max {
                     x.status = Status::Failed;
                     x.result = clip(e.trim(), 2000);
-                    notes.push(format!("❌ board #{id} failed after {attempts} attempt(s): {title}\n{}", one_line(&e, 400)));
+                    notes.push(format!(
+                        "❌ board #{id} failed after {attempts} attempt(s): {title}\n{}",
+                        one_line(&e, 400)
+                    ));
                     notes.extend(self.promote(t));
                 } else {
                     x.status = Status::Ready;
@@ -268,7 +289,8 @@ impl Board {
             if alive(&x.claimed_by) && !stale {
                 continue;
             }
-            let why = if stale { format!("no heartbeat for {} min", timeout / 60) } else { "its worker stopped".to_string() };
+            let why =
+                if stale { format!("no heartbeat for {} min", timeout / 60) } else { "its worker stopped".to_string() };
             x.claimed_by.clear();
             x.updated = t;
             x.comments.push(Comment { t, by: "board".into(), text: format!("reclaimed: {why}") });
@@ -337,7 +359,10 @@ impl Board {
         self.breaker.remove(&key);
         self.promote(t);
         let s = self.get(id)?.status;
-        Ok(format!("#{id} {title}: {}", if s == Status::Ready { "back in the queue" } else { "waiting for its parents" }))
+        Ok(format!(
+            "#{id} {title}: {}",
+            if s == Status::Ready { "back in the queue" } else { "waiting for its parents" }
+        ))
     }
 }
 
@@ -372,7 +397,11 @@ pub fn with<R>(home: &Path, f: impl FnOnce(&mut Board) -> R) -> Result<R, String
     }
     let raw = read(&path(home));
     let res = (|| {
-        let mut b: Board = if raw.trim().is_empty() { Board::default() } else { serde_json::from_str(&raw).map_err(|e| format!("board.json: {e}"))? };
+        let mut b: Board = if raw.trim().is_empty() {
+            Board::default()
+        } else {
+            serde_json::from_str(&raw).map_err(|e| format!("board.json: {e}"))?
+        };
         let r = f(&mut b);
         let out = serde_json::to_string_pretty(&b).map_err(|e| e.to_string())?;
         if out != raw {
@@ -404,11 +433,23 @@ pub fn list_text(home: &Path, filter: &str) -> String {
     let all = filter == "all";
     let shown: Vec<String> = b
         .iter()
-        .filter(|t| if all { true } else if filter.is_empty() { t.status.open() || now().saturating_sub(t.updated) < 86_400 } else { t.status.name() == filter })
+        .filter(|t| {
+            if all {
+                true
+            } else if filter.is_empty() {
+                t.status.open() || now().saturating_sub(t.updated) < 86_400
+            } else {
+                t.status.name() == filter
+            }
+        })
         .map(line)
         .collect();
     if shown.is_empty() {
-        return if b.is_empty() { "The board is empty.".into() } else { "Nothing open on the board (`all` lists finished tasks too).".into() };
+        return if b.is_empty() {
+            "The board is empty.".into()
+        } else {
+            "Nothing open on the board (`all` lists finished tasks too).".into()
+        };
     }
     shown.join("\n")
 }
@@ -444,7 +485,12 @@ pub fn show_text(home: &Path, id: u32) -> String {
 
 /// `/board …` and `pagurus board …`.
 pub fn command(home: &Path, cfg: &Config, args: &[&str]) -> Result<String, String> {
-    let id = |i: usize| args.get(i).map(|s| s.trim_start_matches('#')).and_then(|s| s.parse::<u32>().ok()).ok_or("which task? give its number");
+    let id = |i: usize| {
+        args.get(i)
+            .map(|s| s.trim_start_matches('#'))
+            .and_then(|s| s.parse::<u32>().ok())
+            .ok_or("which task? give its number")
+    };
     let rest = |i: usize| args.get(i..).map(|r| r.join(" ")).unwrap_or_default();
     let t = now();
     match args.first().copied().unwrap_or("") {
@@ -478,22 +524,38 @@ pub fn tool(home: &Path, cfg: &Config, a: &Value) -> Result<String, String> {
         "create" => {
             let assignee = s("assignee");
             let known = crate::peer::names(home);
-            if !assignee.is_empty() && !matches!(assignee.as_str(), "local" | "me" | "self") && !known.contains(&assignee) {
-                return Err(format!("no peer `{assignee}`; paired peers: {}", if known.is_empty() { "none".into() } else { known.join(", ") }));
+            if !assignee.is_empty()
+                && !matches!(assignee.as_str(), "local" | "me" | "self")
+                && !known.contains(&assignee)
+            {
+                return Err(format!(
+                    "no peer `{assignee}`; paired peers: {}",
+                    if known.is_empty() { "none".into() } else { known.join(", ") }
+                ));
             }
             let assignee = if matches!(assignee.as_str(), "local" | "me" | "self") { String::new() } else { assignee };
-            let parents: Vec<u32> = a["parents"].as_array().map(|p| p.iter().filter_map(|x| x.as_u64()).map(|x| x as u32).collect()).unwrap_or_default();
+            let parents: Vec<u32> = a["parents"]
+                .as_array()
+                .map(|p| p.iter().filter_map(|x| x.as_u64()).map(|x| x as u32).collect())
+                .unwrap_or_default();
             let max = a["max_attempts"].as_u64().map(|m| m as u32).unwrap_or(cfg.board.max_attempts);
             let body = crate::util::redact(&s("body"));
             let n = with(home, |b| b.create(&s("title"), &body, &assignee, &parents, max, t))??;
             let state = with(home, |b| b.get(n).map(|x| x.status.name()).unwrap_or("?"))?;
-            let runs = if cfg.board.workers == 0 { "; board.workers is 0, so nothing will run it" } else { "; the daemon runs it in the background and tells the user" };
+            let runs = if cfg.board.workers == 0 {
+                "; board.workers is 0, so nothing will run it"
+            } else {
+                "; the daemon runs it in the background and tells the user"
+            };
             Ok(format!("created #{n} [{state}]{runs}"))
         }
         "list" => Ok(list_text(home, &s("status"))),
         "show" => Ok(show_text(home, id()?)),
         "comment" => with(home, |b| b.comment(id()?, "pagurus", &s("text"), t).map(|_| "comment added".to_string()))?,
-        "complete" => with(home, |b| b.complete(id()?, &s("result"), t).map(|n| format!("marked done{}", if n.is_empty() { "" } else { "; dependants updated" })))?,
+        "complete" => with(home, |b| {
+            b.complete(id()?, &s("result"), t)
+                .map(|n| format!("marked done{}", if n.is_empty() { "" } else { "; dependants updated" }))
+        })?,
         "block" => with(home, |b| b.block(id()?, &s("reason"), t).map(|_| "blocked".to_string()))?,
         "unblock" => with(home, |b| b.unblock(id()?, t))?,
         x => Err(format!("unknown action `{x}`")),
@@ -533,7 +595,10 @@ fn brief(b: &Board, t: &Task) -> String {
         }
     }
     if t.attempts > 1 {
-        s += &format!("\n(This is attempt {} of {}; see the comments for what went wrong before.)\n", t.attempts, t.max_attempts);
+        s += &format!(
+            "\n(This is attempt {} of {}; see the comments for what went wrong before.)\n",
+            t.attempts, t.max_attempts
+        );
     }
     s + "\nDo the task. Your final reply is stored as its result and the next tasks build on it, so include the concrete \
          outcome (paths, numbers, names). If you can't finish without a decision or something only the user can do, reply \
@@ -558,7 +623,14 @@ pub(crate) fn run_task(home: &Path, cfg: &Config, hooks: &Hooks, task: &Task, pr
     if task.assignee.is_empty() {
         let label = format!("(board task #{}: {})", task.id, one_line(&task.title, 60));
         let ask = |cmd: &str| (hooks.approve)(&format!("{cmd}\n{label}"));
-        crate::agent::run_sub(home, cfg, prompt, crate::agent::BOARD_INTRO, if hooks.can_ask { Some(&ask) } else { None }).map(|(r, _)| r)
+        crate::agent::run_sub(
+            home,
+            cfg,
+            prompt,
+            crate::agent::BOARD_INTRO,
+            if hooks.can_ask { Some(&ask) } else { None },
+        )
+        .map(|(r, _)| r)
     } else {
         crate::peer::ask(home, cfg, &task.assignee, prompt)
     }
@@ -594,32 +666,37 @@ pub fn spawn(home: std::path::PathBuf, cfg: Config, hooks: Arc<Hooks>) {
             running.fetch_add(1, Ordering::SeqCst);
             let (home, cfg, hooks, running) = (home.clone(), cfg.clone(), hooks.clone(), running.clone());
             let run = task.claimed_by.clone();
-            let r = std::thread::Builder::new().name(format!("pagurus-board-{}", task.id)).stack_size(1024 * 1024).spawn(move || {
-                eprintln!("pagurus: board #{} started: {}", task.id, one_line(&task.title, 80));
-                let stop = AtomicBool::new(false);
-                let result = std::thread::scope(|sc| {
-                    sc.spawn(|| {
-                        // keep the claim alive while the turn runs
-                        let mut n = 0;
-                        while !stop.load(Ordering::Relaxed) {
-                            std::thread::sleep(Duration::from_secs(1));
-                            n += 1;
-                            if n % 60 == 0 && !with(&home, |b| b.beat(task.id, &run, now())).unwrap_or(true) {
-                                break;
+            let r = std::thread::Builder::new()
+                .name(format!("pagurus-board-{}", task.id))
+                .stack_size(1024 * 1024)
+                .spawn(move || {
+                    eprintln!("pagurus: board #{} started: {}", task.id, one_line(&task.title, 80));
+                    let stop = AtomicBool::new(false);
+                    let result = std::thread::scope(|sc| {
+                        sc.spawn(|| {
+                            // keep the claim alive while the turn runs
+                            let mut n = 0;
+                            while !stop.load(Ordering::Relaxed) {
+                                std::thread::sleep(Duration::from_secs(1));
+                                n += 1;
+                                if n % 60 == 0 && !with(&home, |b| b.beat(task.id, &run, now())).unwrap_or(true) {
+                                    break;
+                                }
                             }
-                        }
+                        });
+                        let r = run_task(&home, &cfg, &hooks, &task, &prompt);
+                        stop.store(true, Ordering::Relaxed);
+                        r
                     });
-                    let r = run_task(&home, &cfg, &hooks, &task, &prompt);
-                    stop.store(true, Ordering::Relaxed);
-                    r
+                    match with(&home, |b| b.finish(task.id, &run, outcome(result), now())) {
+                        Ok(Some(notes)) => notes.into_iter().for_each(|m| (hooks.notify)(m)),
+                        Ok(None) => {
+                            eprintln!("pagurus: board #{}: result dropped, the task was reclaimed meanwhile", task.id)
+                        }
+                        Err(e) => eprintln!("pagurus: board: {e}"),
+                    }
+                    running.fetch_sub(1, Ordering::SeqCst);
                 });
-                match with(&home, |b| b.finish(task.id, &run, outcome(result), now())) {
-                    Ok(Some(notes)) => notes.into_iter().for_each(|m| (hooks.notify)(m)),
-                    Ok(None) => eprintln!("pagurus: board #{}: result dropped, the task was reclaimed meanwhile", task.id),
-                    Err(e) => eprintln!("pagurus: board: {e}"),
-                }
-                running.fetch_sub(1, Ordering::SeqCst);
-            });
             if r.is_err() {
                 break;
             }
@@ -694,7 +771,10 @@ mod tests {
         // a new daemon: the old claim is dead
         b.reclaim(5, 600, |run| run.starts_with("new#"));
         assert_eq!(b.get(a).unwrap().status, Status::Ready);
-        assert!(b.finish(a, &old.claimed_by, Outcome::Done("late".into()), 6).is_none(), "a reclaimed run can't finish");
+        assert!(
+            b.finish(a, &old.claimed_by, Outcome::Done("late".into()), 6).is_none(),
+            "a reclaimed run can't finish"
+        );
         let t = b.claim("new", 10, |_| true).unwrap();
         assert!(b.beat(a, &t.claimed_by, 300));
         assert!(b.reclaim(800, 600, |_| true).is_empty());
@@ -729,7 +809,9 @@ mod tests {
 
     #[test]
     fn worker_replies_map_to_outcomes() {
-        assert!(matches!(outcome(Ok("BLOCKED: need the wifi password".into())), Outcome::Blocked(w) if w.starts_with("need")));
+        assert!(
+            matches!(outcome(Ok("BLOCKED: need the wifi password".into())), Outcome::Blocked(w) if w.starts_with("need"))
+        );
         assert!(matches!(outcome(Ok("all good".into())), Outcome::Done(_)));
         assert!(matches!(outcome(Err("model down".into())), Outcome::Failed(_)));
     }
@@ -738,7 +820,9 @@ mod tests {
     fn stored_on_disk_and_tool_works() {
         let home = std::env::temp_dir().join(format!("pagurus-board-{}", crate::util::new_id()));
         let cfg = Config::default();
-        let out = tool(&home, &cfg, &serde_json::json!({"action":"create","title":"Check backups","body":"look at /srv"})).unwrap();
+        let out =
+            tool(&home, &cfg, &serde_json::json!({"action":"create","title":"Check backups","body":"look at /srv"}))
+                .unwrap();
         assert!(out.starts_with("created #1 [ready]"), "{out}");
         assert!(tool(&home, &cfg, &serde_json::json!({"action":"create","title":"x","assignee":"nobody"})).is_err());
         tool(&home, &cfg, &serde_json::json!({"action":"comment","id":1,"text":"use rsync logs"})).unwrap();

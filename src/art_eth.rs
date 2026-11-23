@@ -36,7 +36,10 @@ fn key(home: &Path, force_new: bool) -> Result<(String, Option<String>), String>
     if !force_new && !have.trim().is_empty() && !expired(&expires) {
         return Ok((have.trim().to_string(), None));
     }
-    let resp = agent().post(&format!("{API}/auth/keys")).call().map_err(|e| format!("OpenSea: couldn't get a free API key ({e})"))?;
+    let resp = agent()
+        .post(&format!("{API}/auth/keys"))
+        .call()
+        .map_err(|e| format!("OpenSea: couldn't get a free API key ({e})"))?;
     let v: Value = resp.into_json().map_err(|e| format!("OpenSea: bad key response ({e})"))?;
     let k = v["api_key"].as_str().filter(|k| k.len() >= 16).ok_or("OpenSea: no key in the response")?.to_string();
     let until = v["expires_at"].as_str().unwrap_or("").to_string();
@@ -107,7 +110,11 @@ pub fn parse_piece(s: &str) -> Option<(String, String)> {
 }
 
 fn short(a: &str) -> String {
-    if a.len() > 12 { format!("{}…{}", &a[..6], &a[a.len() - 4..]) } else { a.to_string() }
+    if a.len() > 12 {
+        format!("{}…{}", &a[..6], &a[a.len() - 4..])
+    } else {
+        a.to_string()
+    }
 }
 
 /// Base units ("6800000000000000000", 18) → 6.8
@@ -161,9 +168,11 @@ fn sale(e: &Value) -> Value {
 
 fn sale_line(s: &Value) -> String {
     let sym = s["symbol"].as_str().unwrap_or("ETH");
-    let name = s["token"]["name"].as_str().filter(|n| !n.is_empty()).map(String::from).unwrap_or_else(|| {
-        format!("#{}", s["token"]["token_id"].as_str().unwrap_or("?"))
-    });
+    let name = s["token"]["name"]
+        .as_str()
+        .filter(|n| !n.is_empty())
+        .map(String::from)
+        .unwrap_or_else(|| format!("#{}", s["token"]["token_id"].as_str().unwrap_or("?")));
     format!(
         "- {} · {} · {} → {}\n",
         date(&s["timestamp"]),
@@ -184,7 +193,11 @@ struct Who {
 
 impl Who {
     fn label(&self) -> String {
-        if self.username.is_empty() { short(&self.address) } else { format!("{} ({})", self.username, short(&self.address)) }
+        if self.username.is_empty() {
+            short(&self.address)
+        } else {
+            format!("{} ({})", self.username, short(&self.address))
+        }
     }
 }
 
@@ -200,8 +213,12 @@ fn who(home: &Path, who: &str, note: &mut Option<String>) -> Result<Who, String>
             verified: a["is_verified"].as_bool() == Some(true),
             website: a["website"].as_str().unwrap_or("").to_string(),
         }),
-        None if is_address(w) => Ok(Who { address: w.to_lowercase(), username: String::new(), verified: false, website: String::new() }),
-        None if w.ends_with(".eth") => Err(format!("OpenSea has no profile for {w}; use the 0x… address or their OpenSea username")),
+        None if is_address(w) => {
+            Ok(Who { address: w.to_lowercase(), username: String::new(), verified: false, website: String::new() })
+        }
+        None if w.ends_with(".eth") => {
+            Err(format!("OpenSea has no profile for {w}; use the 0x… address or their OpenSea username"))
+        }
         None => Err(format!("no OpenSea profile called \"{w}\"; try their 0x… address")),
     }
 }
@@ -211,7 +228,12 @@ fn collections(home: &Path, w: &Who, note: &mut Option<String>) -> Result<Vec<Va
     if w.username.is_empty() {
         return Ok(Vec::new());
     }
-    let d = must(home, &format!("/collections?creator_username={}&chain=ethereum&limit=20", w.username), "collections", note)?;
+    let d = must(
+        home,
+        &format!("/collections?creator_username={}&chain=ethereum&limit=20", w.username),
+        "collections",
+        note,
+    )?;
     Ok(d["collections"].as_array().cloned().unwrap_or_default())
 }
 
@@ -230,10 +252,17 @@ fn stats(home: &Path, slug: &str, note: &mut Option<String>) -> Option<Value> {
     get(home, &format!("/collections/{slug}/stats"), note).ok().flatten()
 }
 
-fn sales_of(home: &Path, slug: &str, after: Option<u64>, n: usize, note: &mut Option<String>) -> Result<Vec<Value>, String> {
+fn sales_of(
+    home: &Path,
+    slug: &str,
+    after: Option<u64>,
+    n: usize,
+    note: &mut Option<String>,
+) -> Result<Vec<Value>, String> {
     let after = after.map(|t| format!("&after={t}")).unwrap_or_default();
     let d = get(home, &format!("/events/collection/{slug}?event_type=sale&limit={}{after}", n.clamp(1, 50)), note)?;
-    Ok(d.map(|d| d["asset_events"].as_array().map(|a| a.iter().map(sale).collect()).unwrap_or_default()).unwrap_or_default())
+    Ok(d.map(|d| d["asset_events"].as_array().map(|a| a.iter().map(sale).collect()).unwrap_or_default())
+        .unwrap_or_default())
 }
 
 // ---------- actions ----------
@@ -242,7 +271,12 @@ pub fn artist(home: &Path, who_s: &str, n: usize) -> Result<String, String> {
     let mut note = None;
     let w = who(home, who_s, &mut note)?;
     let cols = collections(home, &w, &mut note)?;
-    let mut out = format!("{NOTE}\nArtist: {}{} · {}\n", w.label(), if w.verified { " · verified on OpenSea" } else { "" }, profile_url(&w.address));
+    let mut out = format!(
+        "{NOTE}\nArtist: {}{} · {}\n",
+        w.label(),
+        if w.verified { " · verified on OpenSea" } else { "" },
+        profile_url(&w.address)
+    );
     if !w.website.is_empty() {
         out += &format!("Website: {}\n", w.website);
     }
@@ -255,9 +289,17 @@ pub fn artist(home: &Path, who_s: &str, n: usize) -> Result<String, String> {
         let slug = c["collection"].as_str().unwrap_or("");
         let st = stats(home, slug, &mut note).unwrap_or(Value::Null);
         let t = &st["total"];
-        let week = st["intervals"].as_array().and_then(|a| a.iter().find(|i| i["interval"] == "seven_day")).cloned().unwrap_or(Value::Null);
+        let week = st["intervals"]
+            .as_array()
+            .and_then(|a| a.iter().find(|i| i["interval"] == "seven_day"))
+            .cloned()
+            .unwrap_or(Value::Null);
         let sym = t["volume_symbol"].as_str().filter(|s| !s.is_empty()).unwrap_or("ETH");
-        let floor = t["floor_price"].as_f64().filter(|f| *f > 0.0).map(|f| format!(" · floor {}", fmt(f, sym))).unwrap_or_default();
+        let floor = t["floor_price"]
+            .as_f64()
+            .filter(|f| *f > 0.0)
+            .map(|f| format!(" · floor {}", fmt(f, sym)))
+            .unwrap_or_default();
         out += &format!(
             "- {} · {} sales, {} total · {} owners{} · 7 days: {} sales · https://opensea.io/collection/{slug}\n",
             c["name"].as_str().unwrap_or(slug),
@@ -293,10 +335,16 @@ pub fn works(home: &Path, who_s: &str, n: usize) -> Result<String, String> {
             break;
         }
         let slug = c["collection"].as_str().unwrap_or("");
-        let d = get(home, &format!("/collection/{slug}/nfts?limit={}", left.min(50)), &mut note)?.unwrap_or(Value::Null);
+        let d =
+            get(home, &format!("/collection/{slug}/nfts?limit={}", left.min(50)), &mut note)?.unwrap_or(Value::Null);
         for x in d["nfts"].as_array().cloned().unwrap_or_default() {
             let (ct, id) = (x["contract"].as_str().unwrap_or(""), x["identifier"].as_str().unwrap_or(""));
-            out += &format!("- {} · {} · {}\n", x["name"].as_str().filter(|s| !s.is_empty()).unwrap_or("(untitled)"), c["name"].as_str().unwrap_or(slug), item_url(ct, id));
+            out += &format!(
+                "- {} · {} · {}\n",
+                x["name"].as_str().filter(|s| !s.is_empty()).unwrap_or("(untitled)"),
+                c["name"].as_str().unwrap_or(slug),
+                item_url(ct, id)
+            );
             left = left.saturating_sub(1);
         }
     }
@@ -309,12 +357,25 @@ pub fn works(home: &Path, who_s: &str, n: usize) -> Result<String, String> {
 pub fn piece(home: &Path, spec: &str) -> Result<String, String> {
     let (c, id) = parse_piece(spec).ok_or("give the piece as an OpenSea link or contract/token id, e.g. 0x…/123")?;
     let mut note = None;
-    let nft = must(home, &format!("/chain/ethereum/contract/{c}/nfts/{id}"), &format!("token {id} on {c}"), &mut note)?["nft"].clone();
+    let nft = must(home, &format!("/chain/ethereum/contract/{c}/nfts/{id}"), &format!("token {id} on {c}"), &mut note)?
+        ["nft"]
+        .clone();
     let slug = nft["collection"].as_str().unwrap_or("").to_string();
-    let col = if slug.is_empty() { Value::Null } else { get(home, &format!("/collections/{slug}"), &mut note)?.unwrap_or(Value::Null) };
-    let events = get(home, &format!("/events/chain/ethereum/contract/{c}/nfts/{id}?event_type=sale&limit=20"), &mut note)?;
-    let sales: Vec<Value> = events.map(|d| d["asset_events"].as_array().map(|a| a.iter().map(sale).collect()).unwrap_or_default()).unwrap_or_default();
-    let best = if slug.is_empty() { None } else { get(home, &format!("/listings/collection/{slug}/nfts/{id}/best"), &mut note)? };
+    let col = if slug.is_empty() {
+        Value::Null
+    } else {
+        get(home, &format!("/collections/{slug}"), &mut note)?.unwrap_or(Value::Null)
+    };
+    let events =
+        get(home, &format!("/events/chain/ethereum/contract/{c}/nfts/{id}?event_type=sale&limit=20"), &mut note)?;
+    let sales: Vec<Value> = events
+        .map(|d| d["asset_events"].as_array().map(|a| a.iter().map(sale).collect()).unwrap_or_default())
+        .unwrap_or_default();
+    let best = if slug.is_empty() {
+        None
+    } else {
+        get(home, &format!("/listings/collection/{slug}/nfts/{id}/best"), &mut note)?
+    };
 
     let name = nft["name"].as_str().filter(|s| !s.is_empty()).map(String::from).unwrap_or_else(|| format!("#{id}"));
     let owners = nft["owners"].as_array().map_or(0, |o| o.len());
@@ -388,28 +449,52 @@ pub fn piece(home: &Path, spec: &str) -> Result<String, String> {
 pub fn look(home: &Path, spec: &str) -> Result<String, String> {
     let (c, id) = parse_piece(spec).ok_or("give the piece as an OpenSea link or 0x…/id")?;
     let mut note = None;
-    let nft = must(home, &format!("/chain/ethereum/contract/{c}/nfts/{id}"), &format!("token {id} on {c}"), &mut note)?["nft"].clone();
-    let url = nft["display_image_url"].as_str().or(nft["image_url"].as_str()).filter(|s| !s.is_empty()).ok_or("this piece has no preview image")?;
+    let nft = must(home, &format!("/chain/ethereum/contract/{c}/nfts/{id}"), &format!("token {id} on {c}"), &mut note)?
+        ["nft"]
+        .clone();
+    let url = nft["display_image_url"]
+        .as_str()
+        .or(nft["image_url"].as_str())
+        .filter(|s| !s.is_empty())
+        .ok_or("this piece has no preview image")?;
     let name = nft["name"].as_str().filter(|s| !s.is_empty()).map(String::from).unwrap_or_else(|| format!("#{id}"));
     let resp = agent().get(url).call().map_err(|e| format!("couldn't download the preview: {e}"))?;
     let mut buf = Vec::new();
-    resp.into_reader().take(crate::util::MAX_IMAGE_BYTES as u64 + 1).read_to_end(&mut buf).map_err(|e| e.to_string())?;
+    resp.into_reader()
+        .take(crate::util::MAX_IMAGE_BYTES as u64 + 1)
+        .read_to_end(&mut buf)
+        .map_err(|e| e.to_string())?;
     if buf.len() > crate::util::MAX_IMAGE_BYTES {
         return Err("the preview image is larger than 5 MB".into());
     }
     let data_url = crate::util::image_data_url(&buf).map_err(|_| {
-        let kind = if buf.starts_with(b"<svg") || buf.starts_with(b"<?xml") { "an SVG (vector) image" } else { "not a PNG, JPEG, GIF or WebP" };
+        let kind = if buf.starts_with(b"<svg") || buf.starts_with(b"<?xml") {
+            "an SVG (vector) image"
+        } else {
+            "not a PNG, JPEG, GIF or WebP"
+        };
         format!("the preview is {kind}, which pagurus can't show to the model; open {} to see it", item_url(&c, &id))
     })?;
     crate::tools::show_image(format!("{name} ({})", item_url(&c, &id)), data_url);
     let kept = crate::art::keep_preview(home, &name, &buf);
-    Ok(finish(format!("The preview of \"{name}\" ({} KB) is attached below for you to look at. Describe what you see.{kept}", buf.len() / 1024), note))
+    Ok(finish(
+        format!(
+            "The preview of \"{name}\" ({} KB) is attached below for you to look at. Describe what you see.{kept}",
+            buf.len() / 1024
+        ),
+        note,
+    ))
 }
 
 pub fn holdings(home: &Path, who_s: &str, n: usize) -> Result<String, String> {
     let mut note = None;
     let w = who(home, who_s, &mut note)?;
-    let d = must(home, &format!("/chain/ethereum/account/{}/nfts?limit={}", w.address, n.clamp(1, 50)), "holdings", &mut note)?;
+    let d = must(
+        home,
+        &format!("/chain/ethereum/account/{}/nfts?limit={}", w.address, n.clamp(1, 50)),
+        "holdings",
+        &mut note,
+    )?;
     let nfts = d["nfts"].as_array().cloned().unwrap_or_default();
     let mut out = format!("{NOTE}\nCollection of {} ({} shown):\n", w.label(), nfts.len());
     for x in &nfts {
@@ -461,7 +546,8 @@ pub fn sales(home: &Path, who_s: &str, days: u64) -> Result<String, String> {
     for s in all.iter().take(8) {
         out += &sale_line(s);
     }
-    out += "Totals add ETH and WETH together (1 WETH = 1 ETH); a sale paid in another token is counted at face value.\n";
+    out +=
+        "Totals add ETH and WETH together (1 WETH = 1 ETH); a sale paid in another token is counted at face value.\n";
     Ok(finish(out, note))
 }
 
@@ -472,9 +558,16 @@ pub fn trending(home: &Path, n: usize) -> Result<String, String> {
     let mut next = String::new();
     for _ in 0..3 {
         let cursor = if next.is_empty() { String::new() } else { format!("&next={next}") };
-        let d = must(home, &format!("/collections?chain=ethereum&order_by=seven_day_volume&limit=100{cursor}"), "collections", &mut note)?;
+        let d = must(
+            home,
+            &format!("/collections?chain=ethereum&order_by=seven_day_volume&limit=100{cursor}"),
+            "collections",
+            &mut note,
+        )?;
         for c in d["collections"].as_array().cloned().unwrap_or_default() {
-            if c["category"].as_str().is_some_and(|k| k.eq_ignore_ascii_case("art")) && c["is_nsfw"].as_bool() != Some(true) {
+            if c["category"].as_str().is_some_and(|k| k.eq_ignore_ascii_case("art"))
+                && c["is_nsfw"].as_bool() != Some(true)
+            {
                 arts.push(c);
             }
         }
@@ -487,7 +580,11 @@ pub fn trending(home: &Path, n: usize) -> Result<String, String> {
     for c in arts.iter().take(n.clamp(1, 15)) {
         let slug = c["collection"].as_str().unwrap_or("");
         let st = stats(home, slug, &mut note).unwrap_or(Value::Null);
-        let week = st["intervals"].as_array().and_then(|a| a.iter().find(|i| i["interval"] == "seven_day")).cloned().unwrap_or(Value::Null);
+        let week = st["intervals"]
+            .as_array()
+            .and_then(|a| a.iter().find(|i| i["interval"] == "seven_day"))
+            .cloned()
+            .unwrap_or(Value::Null);
         let sym = week["volume_symbol"].as_str().filter(|s| !s.is_empty()).unwrap_or("ETH");
         out += &format!(
             "- {} · by {} · 7 days: {} sales, {} · {} owners · https://opensea.io/collection/{slug}\n",
@@ -529,7 +626,9 @@ pub fn sold_count(home: &Path, who_s: &str, minutes: u64) -> Result<usize, Strin
 pub fn lowest_ask(home: &Path, spec: &str) -> Result<Option<f64>, String> {
     let (c, id) = parse_piece(spec).ok_or("give the piece as an OpenSea link or 0x…/id")?;
     let mut note = None;
-    let nft = must(home, &format!("/chain/ethereum/contract/{c}/nfts/{id}"), &format!("token {id} on {c}"), &mut note)?["nft"].clone();
+    let nft = must(home, &format!("/chain/ethereum/contract/{c}/nfts/{id}"), &format!("token {id} on {c}"), &mut note)?
+        ["nft"]
+        .clone();
     let slug = nft["collection"].as_str().unwrap_or("");
     Ok(get(home, &format!("/listings/collection/{slug}/nfts/{id}/best"), &mut note)?.map(|b| {
         let p = &b["price"]["current"];
@@ -541,14 +640,21 @@ pub fn lowest_ask(home: &Path, spec: &str) -> Result<Option<f64>, String> {
 pub fn meta(home: &Path, spec: &str) -> Result<Value, String> {
     let (c, id) = parse_piece(spec).ok_or("give the piece as an OpenSea link or 0x…/id")?;
     let mut note = None;
-    let nft = must(home, &format!("/chain/ethereum/contract/{c}/nfts/{id}"), &format!("token {id} on {c}"), &mut note)?["nft"].clone();
+    let nft = must(home, &format!("/chain/ethereum/contract/{c}/nfts/{id}"), &format!("token {id} on {c}"), &mut note)?
+        ["nft"]
+        .clone();
     let slug = nft["collection"].as_str().unwrap_or("").to_string();
-    let col = if slug.is_empty() { Value::Null } else { get(home, &format!("/collections/{slug}"), &mut note)?.unwrap_or(Value::Null) };
+    let col = if slug.is_empty() {
+        Value::Null
+    } else {
+        get(home, &format!("/collections/{slug}"), &mut note)?.unwrap_or(Value::Null)
+    };
     let creator = nft["creator"].as_str().or(col["owner"].as_str()).unwrap_or("").to_lowercase();
     let ask = if slug.is_empty() {
         None
     } else {
-        get(home, &format!("/listings/collection/{slug}/nfts/{id}/best"), &mut note)?.map(|b| units(&b["price"]["current"]["value"], &b["price"]["current"]["decimals"]))
+        get(home, &format!("/listings/collection/{slug}/nfts/{id}/best"), &mut note)?
+            .map(|b| units(&b["price"]["current"]["value"], &b["price"]["current"]["decimals"]))
     };
     Ok(json!({
         "chain": "ethereum",
@@ -616,10 +722,17 @@ mod tests {
     fn eth_targets_parse() {
         let want = Some(("0x7f5502673a2364c12d1f2a0fb8bc596e364c6794".to_string(), "1".to_string()));
         assert_eq!(parse_piece("https://opensea.io/item/ethereum/0x7f5502673a2364c12d1f2a0fb8bc596e364c6794/1"), want);
-        assert_eq!(parse_piece("https://opensea.io/assets/ethereum/0x7F5502673A2364C12D1F2A0FB8BC596E364C6794/1"), want);
+        assert_eq!(
+            parse_piece("https://opensea.io/assets/ethereum/0x7F5502673A2364C12D1F2A0FB8BC596E364C6794/1"),
+            want
+        );
         assert_eq!(parse_piece("0x7f5502673a2364c12d1f2a0fb8bc596e364c6794:1"), want);
         assert_eq!(parse_piece("KT1LnP9xJM1Y5mnCvXnwpUQzTi3z5yYcwhu7/182"), None);
-        assert!(looks_eth("0x39cc9c86e67baf2129b80fe3414c397492ea8026") && looks_eth("someone.eth") && looks_eth("https://opensea.io/XCOPY"));
+        assert!(
+            looks_eth("0x39cc9c86e67baf2129b80fe3414c397492ea8026")
+                && looks_eth("someone.eth")
+                && looks_eth("https://opensea.io/XCOPY")
+        );
         assert!(!looks_eth("oinky.tez") && !looks_eth("tz1fQz4PzEuFksEwbc3Xj89hBRxgBNKeGFeS"));
     }
 

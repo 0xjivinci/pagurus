@@ -32,7 +32,8 @@ pub fn serve(home: PathBuf, addr: &str) -> Result<Option<SocketAddr>, String> {
     if addr.is_empty() || addr == "off" {
         return Ok(None);
     }
-    let sa: SocketAddr = addr.parse().map_err(|_| format!("[art] dashboard `{addr}`: use host:port, e.g. 127.0.0.1:7720"))?;
+    let sa: SocketAddr =
+        addr.parse().map_err(|_| format!("[art] dashboard `{addr}`: use host:port, e.g. 127.0.0.1:7720"))?;
     if !sa.ip().is_loopback() {
         return Err(format!("[art] dashboard `{addr}`: only this machine (127.0.0.1) for now"));
     }
@@ -110,9 +111,15 @@ impl Dash {
             ("GET", "/api/budget") => crate::art_taste::budget(&self.home).map(|b| json!({ "text": b })),
             ("GET", "/api/collection") => crate::art_taste::collection(&self.home).map(|c| json!({ "items": c })),
             ("GET", "/api/activity") => Ok(json!({ "items": activity(&self.home, 150) })),
-            ("POST", "/api/rate") => crate::art_taste::rate(&self.home, piece, body["verdict"].as_str().unwrap_or(""), body["why"].as_str().unwrap_or(""))
+            ("POST", "/api/rate") => crate::art_taste::rate(
+                &self.home,
+                piece,
+                body["verdict"].as_str().unwrap_or(""),
+                body["why"].as_str().unwrap_or(""),
+            )
+            .map(|m| json!({ "text": m })),
+            ("POST", "/api/wish") => crate::art_taste::wish(&self.home, piece, body["note"].as_str().unwrap_or(""))
                 .map(|m| json!({ "text": m })),
-            ("POST", "/api/wish") => crate::art_taste::wish(&self.home, piece, body["note"].as_str().unwrap_or("")).map(|m| json!({ "text": m })),
             ("POST", "/api/unwish") => crate::art_taste::unwish(&self.home, piece).map(|m| json!({ "text": m })),
             _ => return respond(&s, 404, "text/plain", "not found"),
         };
@@ -173,9 +180,16 @@ mod tests {
         let host = format!("127.0.0.1:{}", a.port());
         let page = call(a, &format!("GET / HTTP/1.1\r\nHost: {host}\r\n\r\n"));
         assert!(page.starts_with("HTTP/1.1 200") && page.contains("<title>"));
-        let token = page.split("name=\"pagurus-token\" content=\"").nth(1).unwrap().split('"').next().unwrap().to_string();
-        assert!(call(a, &format!("GET / HTTP/1.1\r\nHost: evil.example:{}\r\n\r\n", a.port())).starts_with("HTTP/1.1 403"), "DNS rebinding");
-        assert!(call(a, &format!("GET /api/data HTTP/1.1\r\nHost: {host}\r\n\r\n")).starts_with("HTTP/1.1 403"), "no token");
+        let token =
+            page.split("name=\"pagurus-token\" content=\"").nth(1).unwrap().split('"').next().unwrap().to_string();
+        assert!(
+            call(a, &format!("GET / HTTP/1.1\r\nHost: evil.example:{}\r\n\r\n", a.port())).starts_with("HTTP/1.1 403"),
+            "DNS rebinding"
+        );
+        assert!(
+            call(a, &format!("GET /api/data HTTP/1.1\r\nHost: {host}\r\n\r\n")).starts_with("HTTP/1.1 403"),
+            "no token"
+        );
         let ok = call(a, &format!("GET /api/data HTTP/1.1\r\nHost: {host}\r\nX-Pagurus: {token}\r\n\r\n"));
         assert!(ok.starts_with("HTTP/1.1 200") && ok.contains("\"proposals\""), "{ok}");
         let _ = std::fs::remove_dir_all(&home);

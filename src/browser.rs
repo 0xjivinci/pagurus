@@ -39,7 +39,11 @@ enum Engine {
 
 fn engine_of(exe: &Path) -> Engine {
     let name = exe.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
-    if name.contains("lightpanda") { Engine::Lightpanda } else { Engine::Chromium }
+    if name.contains("lightpanda") {
+        Engine::Lightpanda
+    } else {
+        Engine::Chromium
+    }
 }
 
 struct Browser {
@@ -72,7 +76,8 @@ fn on_path(name: &str) -> Option<PathBuf> {
 
 fn find_lightpanda(home: &Path) -> Option<PathBuf> {
     let user = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
-    on_path("lightpanda").or_else(|| [user.join(".local/bin/lightpanda"), home.join("bin/lightpanda")].into_iter().find(|p| p.is_file()))
+    on_path("lightpanda")
+        .or_else(|| [user.join(".local/bin/lightpanda"), home.join("bin/lightpanda")].into_iter().find(|p| p.is_file()))
 }
 
 /// A browser that can draw (screenshots, PDFs).
@@ -88,7 +93,9 @@ fn find_chromium() -> Option<PathBuf> {
             return Some(app.into());
         }
     }
-    ["chromium", "chromium-browser", "google-chrome", "google-chrome-stable", "brave-browser", "microsoft-edge"].into_iter().find_map(on_path)
+    ["chromium", "chromium-browser", "google-chrome", "google-chrome-stable", "brave-browser", "microsoft-edge"]
+        .into_iter()
+        .find_map(on_path)
 }
 
 /// The command for `exe` at the lowest CPU priority, with a minimal environment.
@@ -145,9 +152,11 @@ fn launch(home: &Path, exe: &Path, tag: &str) -> Result<Browser, String> {
 
 /// Lightpanda serves CDP on a port we pick; no usage data is sent.
 fn start_lightpanda(exe: &Path, profile: &Path) -> Result<(Child, u16, String), String> {
-    let port = std::net::TcpListener::bind("127.0.0.1:0").and_then(|l| l.local_addr()).map_err(|e| e.to_string())?.port();
+    let port =
+        std::net::TcpListener::bind("127.0.0.1:0").and_then(|l| l.local_addr()).map_err(|e| e.to_string())?.port();
     let mut cmd = low_priority(exe);
-    cmd.args(["serve", "--host", "127.0.0.1", "--port", &port.to_string(), "--log-level", "err"]).env("LIGHTPANDA_DISABLE_TELEMETRY", "true");
+    cmd.args(["serve", "--host", "127.0.0.1", "--port", &port.to_string(), "--log-level", "err"])
+        .env("LIGHTPANDA_DISABLE_TELEMETRY", "true");
     let mut child = cmd.spawn().map_err(|e| format!("could not start {}: {e}", exe.display()))?;
     let _ = std::fs::write(profile.join("pagurus-browser.pid"), child.id().to_string());
     let t0 = Instant::now();
@@ -224,7 +233,9 @@ fn clean_stale(home: &Path) {
     let Ok(rd) = std::fs::read_dir(home.join("cache")) else { return };
     for e in rd.flatten() {
         let name = e.file_name().to_string_lossy().into_owned();
-        let Some(owner) = name.strip_prefix("browser-").and_then(|p| p.split('-').next()?.parse::<u32>().ok()) else { continue };
+        let Some(owner) = name.strip_prefix("browser-").and_then(|p| p.split('-').next()?.parse::<u32>().ok()) else {
+            continue;
+        };
         if owner == std::process::id() || alive(owner) {
             continue;
         }
@@ -307,9 +318,13 @@ impl Browser {
 
     /// Run JavaScript in the page and return its (JSON) value.
     fn eval(&mut self, js: &str) -> Result<Value, String> {
-        let r = self.call("Runtime.evaluate", json!({ "expression": js, "returnByValue": true, "awaitPromise": true }))?;
+        let r =
+            self.call("Runtime.evaluate", json!({ "expression": js, "returnByValue": true, "awaitPromise": true }))?;
         if let Some(ex) = r.get("exceptionDetails") {
-            return Err(format!("browser: script error: {}", ex["exception"]["description"].as_str().or(ex["text"].as_str()).unwrap_or("?")));
+            return Err(format!(
+                "browser: script error: {}",
+                ex["exception"]["description"].as_str().or(ex["text"].as_str()).unwrap_or("?")
+            ));
         }
         Ok(r["result"]["value"].clone())
     }
@@ -318,7 +333,9 @@ impl Browser {
     fn settle(&mut self, secs: u64) {
         let t0 = Instant::now();
         while t0.elapsed() < Duration::from_secs(secs) {
-            if self.eval("document.readyState").ok().and_then(|v| v.as_str().map(String::from)).as_deref() == Some("complete") {
+            if self.eval("document.readyState").ok().and_then(|v| v.as_str().map(String::from)).as_deref()
+                == Some("complete")
+            {
                 break;
             }
             std::thread::sleep(Duration::from_millis(250));
@@ -330,7 +347,8 @@ impl Browser {
     fn page(&mut self, text_chars: usize) -> Result<String, String> {
         let v = self.eval(&PAGE_JS.replace("LIMIT", &text_chars.to_string()))?;
         let v: Value = serde_json::from_str(v.as_str().unwrap_or("{}")).unwrap_or_default();
-        let els: Vec<String> = v["els"].as_array().into_iter().flatten().filter_map(|e| e.as_str().map(String::from)).collect();
+        let els: Vec<String> =
+            v["els"].as_array().into_iter().flatten().filter_map(|e| e.as_str().map(String::from)).collect();
         Ok(format!(
             "Page: {}\nURL: {}\n\n{}\n\nElements (click or type by number):\n{}",
             v["title"].as_str().unwrap_or(""),
@@ -398,12 +416,21 @@ fn check_url(url: &str) -> Result<(), String> {
         return Err("refused: the URL contains what looks like a key or token".into());
     }
     let host = u.split("://").nth(1).unwrap_or("").split(['/', '?', '#']).next().unwrap_or("");
-    let netloc = if host.contains(':') && !host.ends_with(']') { host.to_string() } else { format!("{host}:{}", if u.starts_with("https") { 443 } else { 80 }) };
+    let netloc = if host.contains(':') && !host.ends_with(']') {
+        host.to_string()
+    } else {
+        format!("{host}:{}", if u.starts_with("https") { 443 } else { 80 })
+    };
     crate::tools::guarded_resolve(&netloc).map(|_| ()).map_err(|e| format!("refused: {e}"))
 }
 
 /// Run one browser action. `approve` asks the user before typing (tools.rs passes the approval).
-pub fn run(home: &Path, setting: &str, a: &Value, approve: &dyn Fn(&str) -> Result<(), String>) -> Result<String, String> {
+pub fn run(
+    home: &Path,
+    setting: &str,
+    a: &Value,
+    approve: &dyn Fn(&str) -> Result<(), String>,
+) -> Result<String, String> {
     let action = a["action"].as_str().unwrap_or("");
     let arg = |k: &str| a[k].as_str().unwrap_or("").to_string();
     if action == "close" {
@@ -442,7 +469,8 @@ pub fn run(home: &Path, setting: &str, a: &Value, approve: &dyn Fn(&str) -> Resu
         "read" => b.page(TEXT_CHARS * 2),
         "click" => {
             let target = arg("target");
-            let r = b.eval(&element_js(&target, "if (e.tagName == 'A') e.target = '_self'; e.click(); return 'ok';"))?;
+            let r =
+                b.eval(&element_js(&target, "if (e.tagName == 'A') e.target = '_self'; e.click(); return 'ok';"))?;
             if r.as_str() == Some("not found") {
                 return Err(format!("no element `{target}` on this page; use action=read to see the numbered list"));
             }
@@ -456,7 +484,11 @@ pub fn run(home: &Path, setting: &str, a: &Value, approve: &dyn Fn(&str) -> Resu
                 return Err("refused: that text looks like one of pagurus's own keys or tokens".into());
             }
             let host = b.url().split("://").nth(1).unwrap_or("").split('/').next().unwrap_or("").to_string();
-            approve(&format!("type {:?} into `{target}` on {host}{}", crate::util::clip(&text, 120), if a["enter"].as_bool() == Some(true) { " and press Enter" } else { "" }))?;
+            approve(&format!(
+                "type {:?} into `{target}` on {host}{}",
+                crate::util::clip(&text, 120),
+                if a["enter"].as_bool() == Some(true) { " and press Enter" } else { "" }
+            ))?;
             let r = b.eval(&element_js(&target, "e.focus(); if ('value' in e) { e.value = ''; e.dispatchEvent(new Event('input', { bubbles: true })); } return 'ok';"))?;
             if r.as_str() == Some("not found") {
                 return Err(format!("no element `{target}` on this page; use action=read to see the numbered list"));
@@ -500,13 +532,16 @@ pub fn run(home: &Path, setting: &str, a: &Value, approve: &dyn Fn(&str) -> Resu
             // Lightpanda can't draw: a Chromium opens the same address just for this, then closes
             let url = b.url();
             check_url(&url)?;
-            let exe = find_chromium().ok_or("this light browser can't make screenshots or PDFs, and no Chromium is installed for them")?;
+            let exe = find_chromium()
+                .ok_or("this light browser can't make screenshots or PDFs, and no Chromium is installed for them")?;
             let mut c = launch(home, &exe, "-picture")?;
             c.call("Page.navigate", json!({ "url": url }))?;
             c.settle(20);
             picture(home, &mut c, action).map(|m| format!("{m}\n(Captured by opening the same address again in Chromium, so anything typed or clicked here isn't in it.)"))
         }
-        other => Err(format!("browser action `{other}`: use open, read, click, type, scroll, back, screenshot, pdf or close")),
+        other => Err(format!(
+            "browser action `{other}`: use open, read, click, type, scroll, back, screenshot, pdf or close"
+        )),
     }
 }
 
@@ -518,11 +553,18 @@ fn picture(home: &Path, b: &mut Browser, action: &str) -> Result<String, String>
         let bytes = crate::util::unbase64(data).ok_or("browser: bad screenshot data")?;
         let file = save(home, &b.url(), "jpg", &bytes)?;
         crate::tools::show_image(format!("screenshot of {}", b.url()), format!("data:image/jpeg;base64,{data}"));
-        return Ok(format!("Screenshot attached below for you to look at, saved as {}. To give it to the user, send_file that path.", file.display()));
+        return Ok(format!(
+            "Screenshot attached below for you to look at, saved as {}. To give it to the user, send_file that path.",
+            file.display()
+        ));
     }
     let bytes = pdf_bytes(b)?;
     let file = save(home, &b.url(), "pdf", &bytes)?;
-    Ok(format!("Saved the page as a PDF ({} KB): {}. To give it to the user, send_file that path.", bytes.len() / 1024, file.display()))
+    Ok(format!(
+        "Saved the page as a PDF ({} KB): {}. To give it to the user, send_file that path.",
+        bytes.len() / 1024,
+        file.display()
+    ))
 }
 
 /// What `b` shows, printed to PDF.
@@ -533,7 +575,11 @@ fn pdf_bytes(b: &mut Browser) -> Result<Vec<u8>, String> {
     loop {
         let c = b.call("IO.read", json!({ "handle": stream, "size": 1 << 20 }))?;
         let chunk = c["data"].as_str().unwrap_or("");
-        let part = if c["base64Encoded"].as_bool() == Some(true) { crate::util::unbase64(chunk).ok_or("browser: bad PDF data")? } else { chunk.as_bytes().to_vec() };
+        let part = if c["base64Encoded"].as_bool() == Some(true) {
+            crate::util::unbase64(chunk).ok_or("browser: bad PDF data")?
+        } else {
+            chunk.as_bytes().to_vec()
+        };
         bytes.extend_from_slice(&part);
         if c["eof"].as_bool() == Some(true) || bytes.len() > 50 << 20 {
             break;
@@ -557,7 +603,16 @@ pub fn print_to_pdf(home: &Path, html: &Path, pdf: &Path) -> Result<(), String> 
 
 /// A file in workspace/browser named after the page's host.
 fn save(home: &Path, url: &str, ext: &str, bytes: &[u8]) -> Result<PathBuf, String> {
-    let host: String = url.split("://").nth(1).unwrap_or("page").split('/').next().unwrap_or("page").chars().map(|c| if c.is_alphanumeric() || c == '.' { c } else { '-' }).collect();
+    let host: String = url
+        .split("://")
+        .nth(1)
+        .unwrap_or("page")
+        .split('/')
+        .next()
+        .unwrap_or("page")
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '.' { c } else { '-' })
+        .collect();
     let dir = home.join("workspace").join("browser");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
@@ -579,7 +634,11 @@ fn reaper() {
     STARTED.call_once(|| {
         let _ = std::thread::Builder::new().name("pagurus-browser-idle".into()).stack_size(64 * 1024).spawn(|| loop {
             std::thread::sleep(Duration::from_secs(15));
-            let idle = B.try_lock().ok().and_then(|g| g.as_ref().map(|b| b.used.elapsed() > Duration::from_secs(IDLE_SECS))).unwrap_or(false);
+            let idle = B
+                .try_lock()
+                .ok()
+                .and_then(|g| g.as_ref().map(|b| b.used.elapsed() > Duration::from_secs(IDLE_SECS)))
+                .unwrap_or(false);
             if idle {
                 close();
             }

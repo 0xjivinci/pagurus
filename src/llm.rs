@@ -49,14 +49,17 @@ fn wire(m: &Msg) -> Value {
     // fail the whole request on them: send an empty object instead
     if let Some(calls) = v.get_mut("tool_calls").and_then(Value::as_array_mut) {
         for c in calls {
-            let ok = c["function"]["arguments"].as_str().is_some_and(|a| serde_json::from_str::<Value>(a).is_ok_and(|v| v.is_object()));
+            let ok = c["function"]["arguments"]
+                .as_str()
+                .is_some_and(|a| serde_json::from_str::<Value>(a).is_ok_and(|v| v.is_object()));
             if !ok && c.get("function").is_some() {
                 c["function"]["arguments"] = json!("{}");
             }
         }
     }
     if !m.images.is_empty() {
-        let mut parts = vec![json!({ "type": "text", "text": crate::util::redact(m.content.as_deref().unwrap_or_default()) })];
+        let mut parts =
+            vec![json!({ "type": "text", "text": crate::util::redact(m.content.as_deref().unwrap_or_default()) })];
         parts.extend(m.images.iter().map(|u| json!({ "type": "image_url", "image_url": { "url": u } })));
         v["content"] = Value::Array(parts);
     }
@@ -127,7 +130,8 @@ pub fn take_usage() -> (u64, u64) {
 
 fn add_usage(u: &Value) {
     let n = |k: &str| u.get(k).and_then(Value::as_u64).unwrap_or(0);
-    let input = n("prompt_tokens") + n("input_tokens") + n("cache_read_input_tokens") + n("cache_creation_input_tokens");
+    let input =
+        n("prompt_tokens") + n("input_tokens") + n("cache_read_input_tokens") + n("cache_creation_input_tokens");
     let output = n("completion_tokens") + n("output_tokens");
     USAGE.with(|c| {
         let (i, o) = c.get();
@@ -334,7 +338,9 @@ pub fn cooldowns() -> Vec<String> {
         .map(|v| {
             v.iter()
                 .filter(|(_, u, _)| *u > now)
-                .map(|(k, u, n)| format!("{} ({}s, {n} failure(s) in a row)", k.rsplit(' ').next().unwrap_or(k), u - now))
+                .map(|(k, u, n)| {
+                    format!("{} ({}s, {n} failure(s) in a row)", k.rsplit(' ').next().unwrap_or(k), u - now)
+                })
                 .collect()
         })
         .unwrap_or_default()
@@ -367,7 +373,9 @@ impl Route {
             other => return Err(format!("unknown api `{other}` for {}: use openai or anthropic", r.model)),
         };
         let url = match api {
-            Api::Anthropic if r.host() == "api.anthropic.com" && !base.ends_with("/v1") => format!("{base}/v1/messages"),
+            Api::Anthropic if r.host() == "api.anthropic.com" && !base.ends_with("/v1") => {
+                format!("{base}/v1/messages")
+            }
             Api::Anthropic => format!("{base}/messages"),
             Api::OpenAi => format!("{base}/chat/completions"),
         };
@@ -582,7 +590,8 @@ impl Llm {
                                 continue;
                             }
                         };
-                        if cut && msg.tool_calls.is_none() && msg.content.as_deref().is_none_or(|c| c.trim().is_empty()) {
+                        if cut && msg.tool_calls.is_none() && msg.content.as_deref().is_none_or(|c| c.trim().is_empty())
+                        {
                             return Err(self.out_of_tokens());
                         }
                         let mut msg = msg;
@@ -596,7 +605,8 @@ impl Llm {
                         last = format!("no message in response: {}", clip(&v.to_string(), 300));
                         continue;
                     };
-                    let mut msg: Msg = serde_json::from_value(m).map_err(|e| Fail::soft(format!("unexpected message shape: {e}")))?;
+                    let mut msg: Msg =
+                        serde_json::from_value(m).map_err(|e| Fail::soft(format!("unexpected message shape: {e}")))?;
                     // reasoning models can spend the whole budget thinking and return nothing
                     let empty = msg.content.as_deref().is_none_or(|c| c.trim().is_empty())
                         && msg.tool_calls.as_ref().is_none_or(|t| t.is_empty());
@@ -621,9 +631,21 @@ impl Llm {
                         429 if last.contains("PerDay") || last.to_lowercase().contains("per day") => {
                             return Err(Fail { msg: last, fatal: false, cool: 3600 })
                         }
-                        429 => return Err(Fail { msg: last, fatal: false, cool: retry_after.unwrap_or(300).clamp(30, 3600) }),
+                        429 => {
+                            return Err(Fail {
+                                msg: last,
+                                fatal: false,
+                                cool: retry_after.unwrap_or(300).clamp(30, 3600),
+                            })
+                        }
                         // Anthropic: overloaded. Another model is a better bet than a retry.
-                        529 => return Err(Fail { msg: last, fatal: false, cool: retry_after.unwrap_or(60).clamp(30, 3600) }),
+                        529 => {
+                            return Err(Fail {
+                                msg: last,
+                                fatal: false,
+                                cool: retry_after.unwrap_or(60).clamp(30, 3600),
+                            })
+                        }
                         500..=599 => continue,
                         // LM Studio refuses the image/webp label but reads the same bytes
                         // under another one: try that once, and remember it for this server
@@ -692,7 +714,8 @@ fn relabel_webp(body: &mut Value) -> bool {
 /// An error that a request's images probably caused (not a key, quota or network problem).
 fn image_refused(e: &str) -> bool {
     let l = e.to_lowercase();
-    (l.contains("http 400") || l.contains("http 413") || l.contains("http 422")) || (l.contains("image") && !l.contains("http 401"))
+    (l.contains("http 400") || l.contains("http 413") || l.contains("http 422"))
+        || (l.contains("image") && !l.contains("http 401"))
 }
 
 fn without_images(m: &Msg) -> Msg {
@@ -741,10 +764,14 @@ fn usage_note(v: &Value) -> Option<String> {
     let n = |p: &str| u.pointer(p).and_then(Value::as_u64);
     let (input, output) = match n("/input_tokens") {
         // Anthropic counts cached tokens apart from input_tokens
-        Some(i) => (i + n("/cache_read_input_tokens").unwrap_or(0) + n("/cache_creation_input_tokens").unwrap_or(0), n("/output_tokens")),
+        Some(i) => (
+            i + n("/cache_read_input_tokens").unwrap_or(0) + n("/cache_creation_input_tokens").unwrap_or(0),
+            n("/output_tokens"),
+        ),
         None => (n("/prompt_tokens")?, n("/completion_tokens")),
     };
-    let cached = n("/cache_read_input_tokens").or(n("/prompt_tokens_details/cached_tokens")).or(n("/prompt_cache_hit_tokens"));
+    let cached =
+        n("/cache_read_input_tokens").or(n("/prompt_tokens_details/cached_tokens")).or(n("/prompt_cache_hit_tokens"));
     let written = n("/cache_creation_input_tokens").or(n("/prompt_tokens_details/cache_write_tokens"));
     let mut s = format!("{input} tokens in");
     if let Some(c) = cached {
@@ -803,7 +830,8 @@ mod tests {
     #[test]
     fn secrets_never_reach_the_provider_or_transcripts() {
         let key = concat!("sk", "-or-v1-0123456789abcdef0123456789abcdef");
-        let mut m = super::Msg::user_with_images(&format!("my key is {key}"), vec!["data:image/png;base64,AAAA".into()]);
+        let mut m =
+            super::Msg::user_with_images(&format!("my key is {key}"), vec!["data:image/png;base64,AAAA".into()]);
         assert!(!super::wire(&m).to_string().contains(key));
         m.images.clear();
         m.tool_calls = Some(vec![super::ToolCall {
@@ -834,7 +862,8 @@ mod tests {
                     req.extend_from_slice(&buf[..n]);
                     let text = String::from_utf8_lossy(&req).to_lowercase();
                     let Some(h) = text.find("\r\n\r\n") else { continue };
-                    let len = text.split("content-length:").nth(1).and_then(|r| r.split("\r\n").next()?.trim().parse().ok());
+                    let len =
+                        text.split("content-length:").nth(1).and_then(|r| r.split("\r\n").next()?.trim().parse().ok());
                     if req.len() >= h + 4 + len.unwrap_or(0) {
                         break;
                     }
@@ -850,7 +879,10 @@ mod tests {
     /// A local mock provider answering one request with `status` and `body`; returns a Provider for it.
     fn mock(status: &'static str, body: Vec<u8>, key_env: &str) -> crate::config::Provider {
         let (port, _) = serve(vec![(status, body)]);
-        toml::from_str(&format!("base_url = \"http://127.0.0.1:{port}/v1\"\nmodel = \"m\"\napi_key_env = \"{key_env}\"")).unwrap()
+        toml::from_str(&format!(
+            "base_url = \"http://127.0.0.1:{port}/v1\"\nmodel = \"m\"\napi_key_env = \"{key_env}\""
+        ))
+        .unwrap()
     }
 
     fn body_of(req: &str) -> serde_json::Value {
@@ -872,7 +904,8 @@ mod tests {
             "data: [DONE]\n\n"
         );
         let (port, rx) = serve(vec![("200 OK", sse.as_bytes().to_vec()), ("200 OK", br#"{"choices":[{"message":{"role":"assistant","content":"plain"}}],"usage":{"prompt_tokens":5,"completion_tokens":1}}"#.to_vec())]);
-        let p: crate::config::Provider = toml::from_str(&format!("base_url = \"http://127.0.0.1:{port}/v1\"\nmodel = \"m\"")).unwrap();
+        let p: crate::config::Provider =
+            toml::from_str(&format!("base_url = \"http://127.0.0.1:{port}/v1\"\nmodel = \"m\"")).unwrap();
         let mut llm = super::Llm::new(&p).unwrap();
         llm.set_live(true);
         let seen = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
@@ -883,7 +916,10 @@ mod tests {
         assert_eq!(m.content.as_deref(), Some("Checking the disk."));
         assert_eq!(*seen.borrow(), "Checking the disk.");
         let calls = m.tool_calls.unwrap();
-        assert_eq!((calls[0].id.as_str(), calls[0].function.name.as_str(), calls[0].function.arguments.as_str()), ("c1", "shell", "{\"command\":\"df -h\"}"));
+        assert_eq!(
+            (calls[0].id.as_str(), calls[0].function.name.as_str(), calls[0].function.arguments.as_str()),
+            ("c1", "shell", "{\"command\":\"df -h\"}")
+        );
         assert!(super::take_streamed());
         assert!(body_of(&rx.recv().unwrap())["stream"] == json!(true));
         // a server that ignores "stream" and answers plain JSON still works
@@ -904,21 +940,31 @@ mod tests {
         ))
         .unwrap();
         let tools = serde_json::json!([{"type":"function","function":{"name":"shell","description":"run","parameters":{"type":"object"}}}]);
-        let msgs = [super::Msg::system("be brief\n\nSession started now."), super::Msg::user("how long has it been up?")];
+        let msgs =
+            [super::Msg::system("be brief\n\nSession started now."), super::Msg::user("how long has it been up?")];
         let m = super::Llm::new(&p).unwrap().chat(&msgs, &tools).unwrap();
         let call = &m.tool_calls.unwrap()[0];
-        assert_eq!((call.id.as_str(), call.function.name.as_str(), call.function.arguments.as_str()), ("toolu_9", "shell", r#"{"command":"uptime"}"#));
+        assert_eq!(
+            (call.id.as_str(), call.function.name.as_str(), call.function.arguments.as_str()),
+            ("toolu_9", "shell", r#"{"command":"uptime"}"#)
+        );
         let req = rx.recv().unwrap();
         let head = req.to_lowercase();
         assert!(head.starts_with("post /v1/messages "), "{head}");
-        assert!(head.contains(concat!("x-api-key: sk", "-ant-test-key-0123456789")) && head.contains("anthropic-version: 2023-06-01"));
+        assert!(
+            head.contains(concat!("x-api-key: sk", "-ant-test-key-0123456789"))
+                && head.contains("anthropic-version: 2023-06-01")
+        );
         assert!(!head.contains("authorization:"));
         let b = body_of(&req);
         assert_eq!(b["model"], "claude-test");
         assert_eq!(b["system"][0]["text"], "be brief");
         assert_eq!(b["tools"][0]["cache_control"]["type"], "ephemeral");
         assert_eq!(b["messages"][0]["content"][0]["text"], "how long has it been up?");
-        assert_eq!(super::usage_note(&serde_json::from_slice(reply).unwrap()).unwrap(), "2012 tokens in (2000 cached), 7 out");
+        assert_eq!(
+            super::usage_note(&serde_json::from_slice(reply).unwrap()).unwrap(),
+            "2012 tokens in (2000 cached), 7 out"
+        );
     }
 
     #[test]
@@ -927,7 +973,8 @@ mod tests {
             "tool_calls":[{"id":"c1","type":"function","function":{"name":"write_file","arguments":"{\"path\":\"main.py\",\"content\":\"import"}}]}}]}"#;
         let (port, _rx) = serve(vec![("200 OK", reply.to_vec())]);
         let p: crate::config::Provider =
-            toml::from_str(&format!("base_url = \"http://127.0.0.1:{port}/v1\"\nmodel = \"m\"\nmax_tokens = 4096")).unwrap();
+            toml::from_str(&format!("base_url = \"http://127.0.0.1:{port}/v1\"\nmodel = \"m\"\nmax_tokens = 4096"))
+                .unwrap();
         let m = super::Llm::new(&p).unwrap().chat(&[super::Msg::user("write it")], &serde_json::json!([])).unwrap();
         let args = &m.tool_calls.as_ref().unwrap()[0].function.arguments;
         let v: serde_json::Value = serde_json::from_str(args).unwrap();
@@ -942,9 +989,11 @@ mod tests {
     #[test]
     fn a_refused_image_is_dropped_and_the_request_sent_again() {
         let refused = br#"{"error":"'url' field must be a base64 encoded image."}"#;
-        let ok = br#"{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"I couldn't see it."}}]}"#;
+        let ok =
+            br#"{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"I couldn't see it."}}]}"#;
         let (port, rx) = serve(vec![("400 Bad Request", refused.to_vec()), ("200 OK", ok.to_vec())]);
-        let p: crate::config::Provider = toml::from_str(&format!("base_url = \"http://127.0.0.1:{port}/v1\"\nmodel = \"m\"")).unwrap();
+        let p: crate::config::Provider =
+            toml::from_str(&format!("base_url = \"http://127.0.0.1:{port}/v1\"\nmodel = \"m\"")).unwrap();
         let msgs = [super::Msg::user_with_images("what is this?", vec!["data:image/png;base64,iVBORw==".into()])];
         let m = super::Llm::new(&p).unwrap().chat(&msgs, &serde_json::json!([])).unwrap();
         assert_eq!(m.content.as_deref(), Some("I couldn't see it."));
@@ -959,12 +1008,15 @@ mod tests {
     fn webp_refused_by_label_is_relabelled_once_and_remembered() {
         let refused = br#"{"error":"'url' field must be a base64 encoded image."}"#;
         let ok = br#"{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"a crab"}}]}"#;
-        let (port, rx) = serve(vec![("400 Bad Request", refused.to_vec()), ("200 OK", ok.to_vec()), ("200 OK", ok.to_vec())]);
-        let p: crate::config::Provider = toml::from_str(&format!("base_url = \"http://127.0.0.1:{port}/v1\"\nmodel = \"m\"")).unwrap();
+        let (port, rx) =
+            serve(vec![("400 Bad Request", refused.to_vec()), ("200 OK", ok.to_vec()), ("200 OK", ok.to_vec())]);
+        let p: crate::config::Provider =
+            toml::from_str(&format!("base_url = \"http://127.0.0.1:{port}/v1\"\nmodel = \"m\"")).unwrap();
         let llm = super::Llm::new(&p).unwrap();
         let msgs = [super::Msg::user_with_images("what is this?", vec!["data:image/webp;base64,UklGRg==".into()])];
         assert_eq!(llm.chat(&msgs, &serde_json::json!([])).unwrap().content.as_deref(), Some("a crab"));
-        let url = |req: String| body_of(&req)["messages"][0]["content"][1]["image_url"]["url"].as_str().unwrap().to_string();
+        let url =
+            |req: String| body_of(&req)["messages"][0]["content"][1]["image_url"]["url"].as_str().unwrap().to_string();
         assert!(url(rx.recv().unwrap()).starts_with("data:image/webp;"));
         assert!(url(rx.recv().unwrap()).starts_with("data:image/png;base64,UklGRg"), "same bytes, another label");
         llm.chat(&msgs, &serde_json::json!([])).unwrap();
@@ -975,21 +1027,29 @@ mod tests {
     fn anthropic_out_of_tokens_is_explained() {
         let (port, _) = serve(vec![("200 OK", br#"{"content":[],"stop_reason":"max_tokens"}"#.to_vec())]);
         let p: crate::config::Provider =
-            toml::from_str(&format!("base_url = \"http://127.0.0.1:{port}/v1\"\nmodel = \"c\"\napi = \"anthropic\"")).unwrap();
+            toml::from_str(&format!("base_url = \"http://127.0.0.1:{port}/v1\"\nmodel = \"c\"\napi = \"anthropic\""))
+                .unwrap();
         let e = super::Llm::new(&p).unwrap().chat(&[super::Msg::user("hi")], &serde_json::json!([])).unwrap_err();
         assert!(e.contains("ran out of provider.max_tokens"), "{e}");
     }
 
     #[test]
     fn overloaded_anthropic_falls_back_to_openai_compatible() {
-        let (a, arx) = serve(vec![("529 Overloaded", br#"{"type":"error","error":{"type":"overloaded_error"}}"#.to_vec())]);
-        let (o, orx) = serve(vec![("200 OK", br#"{"choices":[{"message":{"role":"assistant","content":"hello from b"}}]}"#.to_vec())]);
+        let (a, arx) =
+            serve(vec![("529 Overloaded", br#"{"type":"error","error":{"type":"overloaded_error"}}"#.to_vec())]);
+        let (o, orx) = serve(vec![(
+            "200 OK",
+            br#"{"choices":[{"message":{"role":"assistant","content":"hello from b"}}]}"#.to_vec(),
+        )]);
         let p: crate::config::Provider = toml::from_str(&format!(
             "base_url = \"http://127.0.0.1:{a}/v1\"\nmodel = \"claude-a\"\napi = \"anthropic\"\n\
              [[fallback]]\nbase_url = \"http://127.0.0.1:{o}/v1\"\nmodel = \"open-b\"\n"
         ))
         .unwrap();
-        let m = super::Llm::new(&p).unwrap().chat(&[super::Msg::system("s"), super::Msg::user("hi")], &serde_json::json!([])).unwrap();
+        let m = super::Llm::new(&p)
+            .unwrap()
+            .chat(&[super::Msg::system("s"), super::Msg::user("hi")], &serde_json::json!([]))
+            .unwrap();
         assert_eq!(m.content.as_deref(), Some("hello from b"));
         assert!(arx.recv().unwrap().starts_with("POST /v1/messages "));
         let req = orx.recv().unwrap();
@@ -1002,11 +1062,22 @@ mod tests {
 
     #[test]
     fn api_mode_is_picked_by_host_or_setting() {
-        let route = |base: &str, api: &str| crate::config::Route { model: "m".into(), base_url: base.into(), api_key_env: "X".into(), api: api.into() };
+        let route = |base: &str, api: &str| crate::config::Route {
+            model: "m".into(),
+            base_url: base.into(),
+            api_key_env: "X".into(),
+            api: api.into(),
+        };
         let r = super::Route::new(&route("https://api.anthropic.com/v1", "")).unwrap();
         assert_eq!((r.api, r.url.as_str()), (super::Api::Anthropic, "https://api.anthropic.com/v1/messages"));
-        assert_eq!(super::Route::new(&route("https://api.anthropic.com", "")).unwrap().url, "https://api.anthropic.com/v1/messages");
-        assert_eq!(super::Route::new(&route("https://api.anthropic.com/v1", "openai")).unwrap().api, super::Api::OpenAi);
+        assert_eq!(
+            super::Route::new(&route("https://api.anthropic.com", "")).unwrap().url,
+            "https://api.anthropic.com/v1/messages"
+        );
+        assert_eq!(
+            super::Route::new(&route("https://api.anthropic.com/v1", "openai")).unwrap().api,
+            super::Api::OpenAi
+        );
         assert_eq!(super::Route::new(&route("https://openrouter.ai/api/v1", "")).unwrap().api, super::Api::OpenAi);
         assert!(super::Route::new(&route("https://x/v1", "gemini")).is_err());
         // OpenRouter gets a cache breakpoint on the stable system prompt for Claude and Gemini models
@@ -1041,8 +1112,16 @@ mod tests {
 
     #[test]
     fn repeated_failures_back_off() {
-        let r = super::Route { url: "http://test-backoff".into(), model: "m".into(), key: None, api: super::Api::OpenAi };
-        let until = || super::COOLDOWN.lock().unwrap().iter().find(|e| e.0.starts_with("http://test-backoff")).map(|e| e.1 - crate::util::now());
+        let r =
+            super::Route { url: "http://test-backoff".into(), model: "m".into(), key: None, api: super::Api::OpenAi };
+        let until = || {
+            super::COOLDOWN
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|e| e.0.starts_with("http://test-backoff"))
+                .map(|e| e.1 - crate::util::now())
+        };
         super::cool(&r, 300);
         assert!(super::cooling(&r));
         assert!(until().unwrap() <= 300);

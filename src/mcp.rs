@@ -189,7 +189,10 @@ fn clean(node: &Value, root: &Value, depth: usize) -> Value {
     let Some(o) = node.as_object() else { return json!({}) };
     // inline a local $ref (depth-limited, so recursive schemas end)
     if let Some(r) = o.get("$ref").and_then(Value::as_str) {
-        let target = r.strip_prefix("#/$defs/").map(|k| &root["$defs"][k]).or_else(|| r.strip_prefix("#/definitions/").map(|k| &root["definitions"][k]));
+        let target = r
+            .strip_prefix("#/$defs/")
+            .map(|k| &root["$defs"][k])
+            .or_else(|| r.strip_prefix("#/definitions/").map(|k| &root["definitions"][k]));
         let mut v = match target {
             Some(t) if t.is_object() && depth < SCHEMA_DEPTH => clean(t, root, depth + 1),
             _ => json!({}),
@@ -215,7 +218,8 @@ fn clean(node: &Value, root: &Value, depth: usize) -> Value {
     }
     let union = o.get("anyOf").or_else(|| o.get("oneOf")).and_then(Value::as_array);
     if let Some(branches) = union {
-        let kept: Vec<Value> = branches.iter().filter(|b| b["type"] != "null").map(|b| clean(b, root, depth + 1)).collect();
+        let kept: Vec<Value> =
+            branches.iter().filter(|b| b["type"] != "null").map(|b| clean(b, root, depth + 1)).collect();
         match kept.len() {
             0 => {}
             1 => {
@@ -231,7 +235,9 @@ fn clean(node: &Value, root: &Value, depth: usize) -> Value {
     }
     let mut ty = match o.get("type") {
         Some(Value::String(t)) => t.clone(),
-        Some(Value::Array(ts)) => ts.iter().filter_map(Value::as_str).find(|t| *t != "null").unwrap_or("string").to_string(),
+        Some(Value::Array(ts)) => {
+            ts.iter().filter_map(Value::as_str).find(|t| *t != "null").unwrap_or("string").to_string()
+        }
         _ if o.contains_key("properties") => "object".into(),
         _ if o.contains_key("items") => "array".into(),
         _ if o.contains_key("enum") || o.contains_key("const") => "string".into(),
@@ -277,7 +283,11 @@ fn clean(node: &Value, root: &Value, depth: usize) -> Value {
                 _ => json!({}),
             };
             // providers (Gemini) insist on a typed `items`
-            let items = if items.get("type").is_none() && items.get("anyOf").is_none() { json!({"type": "string"}) } else { items };
+            let items = if items.get("type").is_none() && items.get("anyOf").is_none() {
+                json!({"type": "string"})
+            } else {
+                items
+            };
             out.insert("items".into(), items);
         }
         "integer" | "number" => {
@@ -324,7 +334,9 @@ fn reply_to(v: &Value) -> Option<Value> {
     Some(match m {
         "ping" => json!({"jsonrpc": "2.0", "id": id, "result": {}}),
         "roots/list" => json!({"jsonrpc": "2.0", "id": id, "result": {"roots": []}}),
-        _ => json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32601, "message": format!("pagurus does not support {m}")}}),
+        _ => {
+            json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32601, "message": format!("pagurus does not support {m}")}})
+        }
     })
 }
 
@@ -340,7 +352,20 @@ impl Proc {
         let mut c = Command::new(crate::util::expand(&s.command));
         c.args(&s.args).env_clear().stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
         // a clean environment: the basics a program needs, plus what the user listed
-        let basics = ["PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "LC_CTYPE", "TMPDIR", "TERM", "SYSTEMROOT", "USERPROFILE", "APPDATA"];
+        let basics = [
+            "PATH",
+            "HOME",
+            "USER",
+            "LOGNAME",
+            "LANG",
+            "LC_ALL",
+            "LC_CTYPE",
+            "TMPDIR",
+            "TERM",
+            "SYSTEMROOT",
+            "USERPROFILE",
+            "APPDATA",
+        ];
         for k in basics.iter().copied().chain(s.env.iter().map(String::as_str)) {
             if let Some(v) = std::env::var_os(k) {
                 c.env(k, v);
@@ -414,7 +439,11 @@ impl Proc {
             _ => "server closed its output".into(),
         };
         let tail = self.stderr.lock().map(|t| t.trim().to_string()).unwrap_or_default();
-        if tail.is_empty() { code } else { format!("{code}; stderr: {}", crate::util::tail(&tail, 600)) }
+        if tail.is_empty() {
+            code
+        } else {
+            format!("{code}; stderr: {}", crate::util::tail(&tail, 600))
+        }
     }
 
     fn request(&mut self, id: u64, msg: &Value, timeout: Duration) -> Result<Value, String> {
@@ -451,7 +480,9 @@ impl Proc {
     }
 
     fn cancel(&mut self, id: u64, why: &str) {
-        let _ = self.send(&json!({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": id, "reason": why}}));
+        let _ = self.send(
+            &json!({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": id, "reason": why}}),
+        );
     }
 }
 
@@ -465,7 +496,8 @@ impl Drop for Proc {
             std::thread::sleep(Duration::from_millis(50));
         }
         #[cfg(unix)]
-        let _ = Command::new("sh").arg("-c").arg(format!("kill -9 -{}", self.child.id())).stderr(Stdio::null()).status();
+        let _ =
+            Command::new("sh").arg("-c").arg(format!("kill -9 -{}", self.child.id())).stderr(Stdio::null()).status();
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
@@ -485,7 +517,12 @@ impl Http {
     fn new(s: &Server) -> Result<Http, String> {
         let token = match s.bearer_env.as_str() {
             "" => None,
-            e => Some(std::env::var(e).ok().filter(|t| !t.trim().is_empty()).ok_or(format!("${e} (bearer_env) is not set"))?),
+            e => Some(
+                std::env::var(e)
+                    .ok()
+                    .filter(|t| !t.trim().is_empty())
+                    .ok_or(format!("${e} (bearer_env) is not set"))?,
+            ),
         };
         let agent = ureq::AgentBuilder::new().timeout_connect(Duration::from_secs(10)).build();
         Ok(Http { agent, url: s.url.clone(), token, session: None, version: None })
@@ -609,7 +646,17 @@ pub struct Conn {
 
 impl Conn {
     fn new(cfg: Server) -> Conn {
-        Conn { cfg, link: None, tools: vec![], hidden: 0, next: 0, info: String::new(), err: String::new(), fails: 0, retry_at: None }
+        Conn {
+            cfg,
+            link: None,
+            tools: vec![],
+            hidden: 0,
+            next: 0,
+            info: String::new(),
+            err: String::new(),
+            fails: 0,
+            retry_at: None,
+        }
     }
 
     fn rpc(&mut self, method: &str, params: Value, timeout: Duration) -> Result<Value, String> {
@@ -664,7 +711,11 @@ impl Conn {
 
     fn handshake(&mut self, timeout: Duration) -> Result<(), String> {
         let t0 = Instant::now();
-        self.link = Some(if self.cfg.url.is_empty() { Link::Stdio(Proc::spawn(&self.cfg)?) } else { Link::Http(Http::new(&self.cfg)?) });
+        self.link = Some(if self.cfg.url.is_empty() {
+            Link::Stdio(Proc::spawn(&self.cfg)?)
+        } else {
+            Link::Http(Http::new(&self.cfg)?)
+        });
         let init = self.rpc(
             "initialize",
             json!({"protocolVersion": PROTOCOL, "capabilities": {}, "clientInfo": {"name": "pagurus", "version": env!("CARGO_PKG_VERSION")}}),
@@ -675,7 +726,11 @@ impl Conn {
             h.version = Some(version.clone());
         }
         let si = &init["serverInfo"];
-        self.info = format!("{} {} (protocol {version})", si["name"].as_str().unwrap_or("?"), si["version"].as_str().unwrap_or(""));
+        self.info = format!(
+            "{} {} (protocol {version})",
+            si["name"].as_str().unwrap_or("?"),
+            si["version"].as_str().unwrap_or("")
+        );
         self.notify("notifications/initialized");
         let (mut tools, mut cursor, mut hidden) = (Vec::new(), None::<String>, 0);
         for _ in 0..20 {
@@ -743,7 +798,8 @@ fn render(r: &Value) -> (String, Vec<(String, String)>) {
             "image" => {
                 let mime = c["mimeType"].as_str().unwrap_or("");
                 let data = c["data"].as_str().unwrap_or("");
-                let ok = matches!(mime, "image/png" | "image/jpeg" | "image/gif" | "image/webp") && data.len() <= crate::util::MAX_IMAGE_BYTES * 4 / 3;
+                let ok = matches!(mime, "image/png" | "image/jpeg" | "image/gif" | "image/webp")
+                    && data.len() <= crate::util::MAX_IMAGE_BYTES * 4 / 3;
                 if ok && !data.is_empty() {
                     images.push((format!("image from MCP ({mime})"), format!("data:{mime};base64,{data}")));
                     parts.push(format!("[{mime} image, attached below]"));
@@ -756,10 +812,15 @@ fn render(r: &Value) -> (String, Vec<(String, String)>) {
                 let uri = res["uri"].as_str().unwrap_or("");
                 match res["text"].as_str() {
                     Some(t) => parts.push(format!("[resource {uri}]\n{t}")),
-                    None => parts.push(format!("[binary resource {uri} ({}), not shown]", res["mimeType"].as_str().unwrap_or("?"))),
+                    None => parts.push(format!(
+                        "[binary resource {uri} ({}), not shown]",
+                        res["mimeType"].as_str().unwrap_or("?")
+                    )),
                 }
             }
-            "resource_link" => parts.push(format!("[link: {} {}]", c["uri"].as_str().unwrap_or(""), c["name"].as_str().unwrap_or(""))),
+            "resource_link" => {
+                parts.push(format!("[link: {} {}]", c["uri"].as_str().unwrap_or(""), c["name"].as_str().unwrap_or("")))
+            }
             other => parts.push(format!("[{other} content, not shown]")),
         }
     }
@@ -913,14 +974,26 @@ pub fn status(cfg: &Config, tools: bool) -> Vec<String> {
         let c = lock(&c);
         if c.link.is_some() {
             let hidden = if c.hidden > 0 { format!(", {} filtered out", c.hidden) } else { String::new() };
-            out.push(format!("ok mcp        {}  {} tool(s){hidden} · {} · {}", s.name, c.tools.len(), c.info, s.kind()));
+            out.push(format!(
+                "ok mcp        {}  {} tool(s){hidden} · {} · {}",
+                s.name,
+                c.tools.len(),
+                c.info,
+                s.kind()
+            ));
         } else {
             out.push(format!("!! mcp        {}  down: {} · {}", s.name, one_line(&c.err, 300), s.kind()));
         }
         if tools {
             for t in &c.tools {
-                let free = s.approve == "never" || any_glob(&s.read_only, &t.name) || (s.approve == "writes" && t.hint_ro);
-                out.push(format!("     {} {:<36} {}", if free { "  " } else { "🔐" }, t.exposed, one_line(&t.desc, 70)));
+                let free =
+                    s.approve == "never" || any_glob(&s.read_only, &t.name) || (s.approve == "writes" && t.hint_ro);
+                out.push(format!(
+                    "     {} {:<36} {}",
+                    if free { "  " } else { "🔐" },
+                    t.exposed,
+                    one_line(&t.desc, 70)
+                ));
             }
         }
     }
@@ -953,8 +1026,15 @@ pub fn cli(cfg: &Config, args: &[String]) -> Result<(), String> {
                 println!("  {:<40} {}", t.exposed, one_line(&t.desc, 80));
             }
             if let Some(tool) = args.get(2) {
-                let a: Value = serde_json::from_str(args.get(3).map(String::as_str).unwrap_or("{}")).map_err(|e| format!("args: {e}"))?;
-                let t = c.tools.iter().find(|t| t.name == *tool || t.exposed == *tool).ok_or(format!("no tool `{tool}`"))?.name.clone();
+                let a: Value = serde_json::from_str(args.get(3).map(String::as_str).unwrap_or("{}"))
+                    .map_err(|e| format!("args: {e}"))?;
+                let t = c
+                    .tools
+                    .iter()
+                    .find(|t| t.name == *tool || t.exposed == *tool)
+                    .ok_or(format!("no tool `{tool}`"))?
+                    .name
+                    .clone();
                 let (text, images) = render(&c.call(&t, &a)?);
                 println!("\n{text}");
                 if !images.is_empty() {
@@ -983,8 +1063,18 @@ mod tests {
 
     #[test]
     fn globs_and_filters() {
-        assert!(glob("read_*", "read_file") && glob("*", "x") && glob("a*c*e", "abcde") && !glob("a*c", "abd") && glob("x", "x"));
-        let s = Server { allow: vec!["get_*".into(), "list".into()], deny: vec!["get_secret".into()], ..Default::default() };
+        assert!(
+            glob("read_*", "read_file")
+                && glob("*", "x")
+                && glob("a*c*e", "abcde")
+                && !glob("a*c", "abd")
+                && glob("x", "x")
+        );
+        let s = Server {
+            allow: vec!["get_*".into(), "list".into()],
+            deny: vec!["get_secret".into()],
+            ..Default::default()
+        };
         assert!(wanted(&s, "get_page") && wanted(&s, "list"));
         assert!(!wanted(&s, "get_secret") && !wanted(&s, "delete"));
     }
@@ -997,10 +1087,18 @@ mod tests {
         assert!(check(&[Server { url: "https://x".into(), ..ok.clone() }]).is_err(), "both command and url");
         assert!(check(&[Server { name: "a b".into(), ..ok.clone() }]).is_err());
         assert!(check(&[Server { approve: "maybe".into(), ..ok.clone() }]).is_err());
-        let http = Server { command: String::new(), url: "http://example.com/mcp".into(), bearer_env: "T".into(), ..ok.clone() };
+        let http = Server {
+            command: String::new(),
+            url: "http://example.com/mcp".into(),
+            bearer_env: "T".into(),
+            ..ok.clone()
+        };
         assert!(check(std::slice::from_ref(&http)).is_err(), "no token over plain http");
         assert!(check(&[Server { url: "http://localhost:3000/mcp".into(), ..http }]).is_ok());
-        let c: Config = toml::from_str("[[mcp]]\nname = \"fs\"\ncommand = \"npx\"\nargs = [\"-y\", \"x\"]\nread_only = [\"read_*\"]\n").unwrap();
+        let c: Config = toml::from_str(
+            "[[mcp]]\nname = \"fs\"\ncommand = \"npx\"\nargs = [\"-y\", \"x\"]\nread_only = [\"read_*\"]\n",
+        )
+        .unwrap();
         assert_eq!(c.mcp[0].approve, "always");
         assert!(c.mcp[0].enabled);
         assert_eq!(c.mcp[0].timeout_secs, 60);
@@ -1026,7 +1124,9 @@ mod tests {
         });
         let c = clean_schema(&s);
         let text = c.to_string();
-        for gone in ["$schema", "additionalProperties", "default", "format", "definitions", "$ref", "null", "oneOf", "const"] {
+        for gone in
+            ["$schema", "additionalProperties", "default", "format", "definitions", "$ref", "null", "oneOf", "const"]
+        {
             assert!(!text.contains(gone), "{gone} should be gone: {text}");
         }
         let p = &c["properties"];
@@ -1058,7 +1158,9 @@ mod tests {
         ]});
         let (t, imgs) = render(&r);
         assert!(t.starts_with("hello\n[image/png image, attached below]"));
-        assert!(t.contains("svg+xml image") && t.contains("[resource file:///a]\nbody") && t.contains("[audio content"));
+        assert!(
+            t.contains("svg+xml image") && t.contains("[resource file:///a]\nbody") && t.contains("[audio content")
+        );
         assert_eq!(imgs.len(), 1);
         assert_eq!(imgs[0].1, "data:image/png;base64,iVBORw0K");
         let (t, _) = render(&json!({"isError": true, "content": [{"type": "text", "text": "nope"}]}));
@@ -1094,7 +1196,13 @@ done
         std::fs::create_dir_all(&dir).unwrap();
         let script = dir.join("mock.sh");
         std::fs::write(&script, MOCK).unwrap();
-        let mut s = Server { name: name.into(), command: "sh".into(), args: vec![script.display().to_string()], timeout_secs: 1, ..Default::default() };
+        let mut s = Server {
+            name: name.into(),
+            command: "sh".into(),
+            args: vec![script.display().to_string()],
+            timeout_secs: 1,
+            ..Default::default()
+        };
         extra(&mut s);
         (Config { mcp: vec![s], ..Default::default() }, dir)
     }
@@ -1111,7 +1219,11 @@ done
         });
         let defs = definitions(&cfg);
         let names: Vec<&str> = defs.iter().map(|d| d["function"]["name"].as_str().unwrap()).collect();
-        assert_eq!(names, ["mcp_mock1_echo", "mcp_mock1_slow", "mcp_mock1_crash", "mcp_mock1_env"], "both pages, minus denied");
+        assert_eq!(
+            names,
+            ["mcp_mock1_echo", "mcp_mock1_slow", "mcp_mock1_crash", "mcp_mock1_env"],
+            "both pages, minus denied"
+        );
         assert_eq!(defs[0]["function"]["description"], "Echo it back");
         assert_eq!(defs[1]["function"]["parameters"], json!({"type": "object", "properties": {}, "required": []}));
         let ctx = Ctx { home: &home, cfg: &cfg, session: "t", interactive: false, approver: None };
@@ -1137,7 +1249,13 @@ done
         let (cfg, home) = mock("mock2", |s| s.read_only = vec!["env".into()]);
         assert_eq!(definitions(&cfg).len(), 5);
         let asked = std::cell::RefCell::new(Vec::<String>::new());
-        let (yes, no) = (|w: &str| { asked.borrow_mut().push(w.to_string()); true }, |_: &str| false);
+        let (yes, no) = (
+            |w: &str| {
+                asked.borrow_mut().push(w.to_string());
+                true
+            },
+            |_: &str| false,
+        );
         let ctx = Ctx { home: &home, cfg: &cfg, session: "t", interactive: false, approver: None };
         assert!(call(&ctx, "mcp_mock2_echo", &json!({})).unwrap_err().contains("unattended"));
         assert!(call(&ctx, "mcp_mock2_env", &json!({})).is_ok(), "read_only runs freely");
@@ -1221,7 +1339,13 @@ done
             }
         });
         std::env::set_var("MCP_TEST_TOKEN", "tok-1");
-        let s = Server { name: "web".into(), url, bearer_env: "MCP_TEST_TOKEN".into(), approve: "never".into(), ..Default::default() };
+        let s = Server {
+            name: "web".into(),
+            url,
+            bearer_env: "MCP_TEST_TOKEN".into(),
+            approve: "never".into(),
+            ..Default::default()
+        };
         let cfg = Config { mcp: vec![s], ..Default::default() };
         let defs = definitions(&cfg);
         assert_eq!(defs[0]["function"]["name"], "mcp_web_time");

@@ -288,7 +288,11 @@ mod tests {
         let home = std::env::temp_dir().join(format!("pagurus-retire-{}", crate::util::new_id()));
         let mut cfg = crate::config::Config::default();
         cfg.learning.mode = "auto".into();
-        let skill = |n: &str, d: &str| crate::learn::Change::SkillWrite { name: n.into(), description: d.into(), body: "1. step".into() };
+        let skill = |n: &str, d: &str| crate::learn::Change::SkillWrite {
+            name: n.into(),
+            description: d.into(),
+            body: "1. step".into(),
+        };
         crate::learn::submit(&home, &cfg, skill("flaky", "read the SoC temperature"), "", "s").unwrap();
         crate::learn::submit(&home, &cfg, skill("steady", "rotate the nginx logs"), "", "s").unwrap();
         // hand-written by the user: never retired by pagurus
@@ -309,12 +313,23 @@ mod tests {
         for _ in 0..RETIRE_STREAK {
             record_outcome(&home, "steady", false);
         }
-        let patch = crate::learn::Change::SkillPatch { name: "steady".into(), old_text: "1. step".into(), text: "1. better step".into() };
+        let patch = crate::learn::Change::SkillPatch {
+            name: "steady".into(),
+            old_text: "1. step".into(),
+            text: "1. better step".into(),
+        };
         crate::learn::submit(&home, &cfg, patch, "", "s").unwrap();
         assert_eq!(usage(&home)["steady"].streak, 0);
         assert!(auto_retire(&home).is_empty());
         // undo brings the retired skill back
-        let id = crate::learn::history_text(&home, 10).lines().find(|l| l.contains("retire skill flaky")).unwrap().split_whitespace().next().unwrap().to_string();
+        let id = crate::learn::history_text(&home, 10)
+            .lines()
+            .find(|l| l.contains("retire skill flaky"))
+            .unwrap()
+            .split_whitespace()
+            .next()
+            .unwrap()
+            .to_string();
         crate::learn::rollback(&home, &id).unwrap();
         assert!(home.join("skills/flaky/SKILL.md").exists() && !is_archived(&home, "flaky"));
         let _ = std::fs::remove_dir_all(&home);

@@ -25,8 +25,10 @@ fn open(home: &Path) -> rusqlite::Result<Connection> {
 fn refresh(home: &Path, db: &mut Connection) -> rusqlite::Result<()> {
     let tx = db.transaction()?;
     for (name, len) in super::session_files(home) {
-        let mut from: u64 =
-            tx.query_row("SELECT bytes FROM files WHERE name = ?1", [&name], |r| r.get::<_, i64>(0)).optional()?.unwrap_or(0) as u64;
+        let mut from: u64 = tx
+            .query_row("SELECT bytes FROM files WHERE name = ?1", [&name], |r| r.get::<_, i64>(0))
+            .optional()?
+            .unwrap_or(0) as u64;
         if len == from {
             continue;
         }
@@ -54,7 +56,8 @@ fn refresh(home: &Path, db: &mut Connection) -> rusqlite::Result<()> {
 
 /// An FTS5 query from the terms: each quoted (no operator injection), `*` for prefixes.
 fn expr(terms: &[(String, bool)], op: &str) -> String {
-    let q: Vec<String> = terms.iter().map(|(t, p)| format!("\"{}\"{}", t.replace('"', ""), if *p { "*" } else { "" })).collect();
+    let q: Vec<String> =
+        terms.iter().map(|(t, p)| format!("\"{}\"{}", t.replace('"', ""), if *p { "*" } else { "" })).collect();
     q.join(op)
 }
 
@@ -68,12 +71,17 @@ pub fn search(home: &Path, q: &Query, terms: &[(String, bool)]) -> Result<Vec<Hi
         let mut stmt = db.prepare(
             "SELECT rowid, sid, t, role, content FROM msgs WHERE msgs MATCH ?1 ORDER BY bm25(msgs) LIMIT 400",
         )?;
-        let mut around =
-            db.prepare("SELECT role, content FROM msgs WHERE rowid = ?1 AND sid = ?2")?;
+        let mut around = db.prepare("SELECT role, content FROM msgs WHERE rowid = ?1 AND sid = ?2")?;
         // every term first, then any of them to fill up
         for op in [" ", " OR "] {
             let rows = stmt.query_map([expr(terms, op)], |r| {
-                Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?, r.get::<_, String>(3)?, r.get::<_, String>(4)?))
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, i64>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, String>(4)?,
+                ))
             })?;
             for row in rows {
                 let (rowid, sid, t, role, text) = row?;
@@ -112,7 +120,11 @@ mod tests {
     fn fts5_indexes_jsonl_incrementally_and_ranks() {
         let home = home_with(&[(
             "100-tg-a",
-            &[(100, "user", "the cloudflare tunnel url changed"), (101, "assistant", "restarted cloudflared"), (102, "user", "tunnels again?")],
+            &[
+                (100, "user", "the cloudflare tunnel url changed"),
+                (101, "assistant", "restarted cloudflared"),
+                (102, "user", "tunnels again?"),
+            ],
         )]);
         let hits = find(&home, "cloudflare tunnels");
         assert!(hits[0].text.contains("cloudflare tunnel"), "all terms first, porter-stemmed");

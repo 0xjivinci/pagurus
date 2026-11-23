@@ -3,7 +3,10 @@
 //! page, so the PDF never depends on the browser reaching IPFS (on a Pi it
 //! often can't), and the numbers come straight from objkt, never from memory.
 
-use crate::art::{day, fetch_image, gql, holder_label, image_urls, num, parse_piece, piece_url, profile_url, sale, tez, BURN, SALE_FIELDS, SALE_FILTER};
+use crate::art::{
+    day, fetch_image, gql, holder_label, image_urls, num, parse_piece, piece_url, profile_url, sale, tez, BURN,
+    SALE_FIELDS, SALE_FILTER,
+};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
@@ -53,7 +56,12 @@ struct Piece {
 impl Piece {
     fn status(&self) -> String {
         if self.primary_left > 0 {
-            format!("primary open: {} of {} left at {}", self.primary_left, self.supply, self.primary_price.map(tez).unwrap_or_default())
+            format!(
+                "primary open: {} of {} left at {}",
+                self.primary_left,
+                self.supply,
+                self.primary_price.map(tez).unwrap_or_default()
+            )
         } else if self.artist_holds == 0 {
             "sold out".into()
         } else {
@@ -96,7 +104,11 @@ fn load(c: &str, id: &str, budget: &mut usize) -> Result<Piece, String> {
         minted: day(&t["timestamp"]),
         supply: num(&t["supply"]).unwrap_or(0),
         holders: holders.len(),
-        artist_holds: holders.iter().filter(|h| h["holder_address"].as_str() == Some(&ca)).filter_map(|h| num(&h["quantity"])).sum(),
+        artist_holds: holders
+            .iter()
+            .filter(|h| h["holder_address"].as_str() == Some(&ca))
+            .filter_map(|h| num(&h["quantity"]))
+            .sum(),
         mime: t["mime"].as_str().unwrap_or("").to_string(),
         floor: num(&t["lowest_ask"]),
         listed: listings.iter().filter_map(|l| num(&l["amount_left"])).sum(),
@@ -115,7 +127,8 @@ fn load(c: &str, id: &str, budget: &mut usize) -> Result<Piece, String> {
 /// that is too big, won't load, or the report's image budget is spent.
 fn embed(t: &Value, c: &str, id: &str, budget: &mut usize) -> Option<String> {
     let keys: &[&str] = if *budget > 0 { &["display_uri", "thumbnail_uri"] } else { &["thumbnail_uri"] };
-    let mut tries: Vec<Vec<String>> = keys.iter().map(|k| image_urls(t[*k].as_str().unwrap_or(""))).filter(|u| !u.is_empty()).collect();
+    let mut tries: Vec<Vec<String>> =
+        keys.iter().map(|k| image_urls(t[*k].as_str().unwrap_or(""))).filter(|u| !u.is_empty()).collect();
     // objkt's own resized copies, for pieces whose images are huge (an 86 MB animation)
     for size in ["thumb400", "thumb288"] {
         tries.push(vec![format!("https://assets.objkt.media/file/assets-003/{c}/{id}/{size}")]);
@@ -280,13 +293,20 @@ fn print_pdf(html: &Path, pdf: &Path) -> Result<(), String> {
         }
         None => Command::new(&exe),
     };
-    cmd.args(["--headless", "--disable-gpu", "--no-first-run", "--no-default-browser-check", "--no-pdf-header-footer", "--hide-scrollbars"])
-        .arg(format!("--user-data-dir={}", profile.display()))
-        .arg(format!("--print-to-pdf={}", pdf.display()))
-        .arg(format!("file://{}", html.display()))
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+    cmd.args([
+        "--headless",
+        "--disable-gpu",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--no-pdf-header-footer",
+        "--hide-scrollbars",
+    ])
+    .arg(format!("--user-data-dir={}", profile.display()))
+    .arg(format!("--print-to-pdf={}", pdf.display()))
+    .arg(format!("file://{}", html.display()))
+    .stdin(Stdio::null())
+    .stdout(Stdio::null())
+    .stderr(Stdio::null());
     crate::tools::clean_env(&mut cmd);
     #[cfg(unix)]
     {
@@ -298,7 +318,9 @@ fn print_pdf(html: &Path, pdf: &Path) -> Result<(), String> {
     let done = loop {
         match child.try_wait() {
             Ok(Some(_)) => break true,
-            Ok(None) if std::time::Instant::now() < deadline => std::thread::sleep(std::time::Duration::from_millis(250)),
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(250))
+            }
             _ => break false,
         }
     };
@@ -323,7 +345,11 @@ fn slug(s: &str) -> String {
         out = out.replace("--", "-");
     }
     let out: String = out.trim_matches('-').chars().take(50).collect();
-    if out.is_empty() { "art-report".into() } else { out }
+    if out.is_empty() {
+        "art-report".into()
+    } else {
+        out
+    }
 }
 
 pub fn report(home: &Path, a: &Value) -> Result<String, String> {
@@ -349,7 +375,8 @@ pub fn report(home: &Path, a: &Value) -> Result<String, String> {
     let pdf = base.with_extension("pdf");
     // DevTools first (headless --print-to-pdf hangs in some browsers, e.g. Brave), the command line second
     #[cfg(feature = "browser")]
-    let printed = crate::browser::print_to_pdf(home, &html, &pdf).or_else(|e| print_pdf(&html, &pdf).map_err(|e2| format!("{e}; {e2}")));
+    let printed = crate::browser::print_to_pdf(home, &html, &pdf)
+        .or_else(|e| print_pdf(&html, &pdf).map_err(|e2| format!("{e}; {e2}")));
     #[cfg(not(feature = "browser"))]
     let printed = print_pdf(&html, &pdf);
     let (file, made) = match printed {
@@ -401,7 +428,8 @@ mod tests {
     fn pieces_and_artists_are_both_accepted_and_capped() {
         let a = json!({ "pieces": "https://objkt.com/tokens/KT1XaCf6gkjFnKg3QmPfn6gep53moMvjkj1E/50832, KT1XaCf6gkjFnKg3QmPfn6gep53moMvjkj1E/50978" });
         assert_eq!(choose(&a).unwrap().len(), 2);
-        let a = json!({ "pieces": ["KT1XaCf6gkjFnKg3QmPfn6gep53moMvjkj1E/1", "KT1XaCf6gkjFnKg3QmPfn6gep53moMvjkj1E/1"] });
+        let a =
+            json!({ "pieces": ["KT1XaCf6gkjFnKg3QmPfn6gep53moMvjkj1E/1", "KT1XaCf6gkjFnKg3QmPfn6gep53moMvjkj1E/1"] });
         assert_eq!(choose(&a).unwrap().len(), 1, "duplicates are shown once");
         assert!(choose(&json!({ "pieces": "voxel art" })).is_err());
         assert!(choose(&json!({})).is_err());
@@ -410,9 +438,25 @@ mod tests {
     #[test]
     fn the_status_says_sold_out_open_or_kept() {
         let mut p = Piece {
-            name: "x".into(), url: String::new(), artist: String::new(), artist_url: String::new(), minted: String::new(),
-            supply: 100, holders: 3, artist_holds: 0, mime: String::new(), floor: None, listed: 0, primary_left: 0,
-            primary_price: None, sales: 0, sales_30d: 0, volume: 0, last: None, high: None, image: None,
+            name: "x".into(),
+            url: String::new(),
+            artist: String::new(),
+            artist_url: String::new(),
+            minted: String::new(),
+            supply: 100,
+            holders: 3,
+            artist_holds: 0,
+            mime: String::new(),
+            floor: None,
+            listed: 0,
+            primary_left: 0,
+            primary_price: None,
+            sales: 0,
+            sales_30d: 0,
+            volume: 0,
+            last: None,
+            high: None,
+            image: None,
         };
         assert_eq!(p.status(), "sold out");
         assert_eq!(p.market(), "never sold");
@@ -430,10 +474,25 @@ mod tests {
     #[test]
     fn the_page_escapes_names_and_embeds_images() {
         let p = Piece {
-            name: "<b>evil</b>".into(), url: "u".into(), artist: "A & B".into(), artist_url: "p".into(), minted: "2026-11-19".into(),
-            supply: 1, holders: 1, artist_holds: 0, mime: "image/png".into(), floor: Some(1_500_000), listed: 1, primary_left: 0,
-            primary_price: None, sales: 2, sales_30d: 1, volume: 3_000_000, last: Some(("2026-11-20".into(), 1_500_000)),
-            high: Some(1_500_000), image: Some("data:image/png;base64,AAAA".into()),
+            name: "<b>evil</b>".into(),
+            url: "u".into(),
+            artist: "A & B".into(),
+            artist_url: "p".into(),
+            minted: "2026-11-19".into(),
+            supply: 1,
+            holders: 1,
+            artist_holds: 0,
+            mime: "image/png".into(),
+            floor: Some(1_500_000),
+            listed: 1,
+            primary_left: 0,
+            primary_price: None,
+            sales: 2,
+            sales_30d: 1,
+            volume: 3_000_000,
+            last: Some(("2026-11-20".into(), 1_500_000)),
+            high: Some(1_500_000),
+            image: Some("data:image/png;base64,AAAA".into()),
         };
         let h = page("Voxel <report>", &[p]);
         assert!(h.contains("&lt;b&gt;evil") && !h.contains("<b>evil"));

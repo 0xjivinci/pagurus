@@ -124,11 +124,18 @@ pub fn audit(home: &Path, how: &str, cmd: &str) {
 pub fn report(home: &Path, all: bool, n: usize) -> String {
     let mut lines: Vec<Value> = [home.join("audit.jsonl.1"), home.join("audit.jsonl")]
         .iter()
-        .flat_map(|p| crate::util::read(p).lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).collect::<Vec<_>>())
+        .flat_map(|p| {
+            crate::util::read(p).lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).collect::<Vec<_>>()
+        })
         .filter(|v| all || v["how"] != "read-only")
         .collect();
     if lines.is_empty() {
-        return if all { "Nothing in the audit log yet." } else { "No commands needed a decision yet (`/audit all` includes read-only ones)." }.into();
+        return if all {
+            "Nothing in the audit log yet."
+        } else {
+            "No commands needed a decision yet (`/audit all` includes read-only ones)."
+        }
+        .into();
     }
     let skip = lines.len().saturating_sub(n);
     lines.drain(..skip);

@@ -14,7 +14,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=PAGURUS_COMMIT");
     println!("cargo:rerun-if-env-changed=PAGURUS_DATE");
     println!("cargo:rerun-if-changed=src"); // for the "+" (uncommitted changes) mark
-    // a new commit or checkout changes HEAD or the branch it points at
+                                            // a new commit or checkout changes HEAD or the branch it points at
     if let Some(dir) = git(&["rev-parse", "--git-dir"]) {
         println!("cargo:rerun-if-changed={dir}/HEAD");
         if let Some(r) = git(&["symbolic-ref", "-q", "HEAD"]) {
@@ -29,7 +29,8 @@ fn main() {
         let dirty = git(&["status", "--porcelain", "--untracked-files=no"]).is_some();
         Some(if dirty { format!("{c}+") } else { c })
     });
-    let date = std::env::var("PAGURUS_DATE").ok().filter(|s| !s.is_empty()).or_else(|| git(&["log", "-1", "--format=%cs"]));
+    let date =
+        std::env::var("PAGURUS_DATE").ok().filter(|s| !s.is_empty()).or_else(|| git(&["log", "-1", "--format=%cs"]));
     println!("cargo:rustc-env=PAGURUS_COMMIT={}", commit.unwrap_or_default());
     println!("cargo:rustc-env=PAGURUS_DATE={}", date.unwrap_or_default());
 }

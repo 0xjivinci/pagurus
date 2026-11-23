@@ -53,11 +53,16 @@ pub trait Channel: Send + Sync {
 
 /// For the system prompt: where the user talks to pagurus.
 pub fn describe(cfg: &crate::config::Config) -> String {
-    let on: Vec<&str> = [("Telegram", cfg.telegram.is_some()), ("Discord", cfg.discord.is_some()), ("Slack", cfg.slack.is_some()), ("email", cfg.email.is_some())]
-        .iter()
-        .filter(|(_, on)| *on)
-        .map(|(n, _)| *n)
-        .collect();
+    let on: Vec<&str> = [
+        ("Telegram", cfg.telegram.is_some()),
+        ("Discord", cfg.discord.is_some()),
+        ("Slack", cfg.slack.is_some()),
+        ("email", cfg.email.is_some()),
+    ]
+    .iter()
+    .filter(|(_, on)| *on)
+    .map(|(n, _)| *n)
+    .collect();
     if on.is_empty() {
         return String::new();
     }
@@ -157,7 +162,10 @@ impl Channels {
         if let Some((c, to)) = self.route(chat) {
             if let Err(e) = c.upload(&to, path, &crate::util::redact(caption)) {
                 let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
-                self.send(chat, &format!("(couldn't send {name}: {}; it is at {})", crate::util::one_line(&e, 120), path.display()));
+                self.send(
+                    chat,
+                    &format!("(couldn't send {name}: {}; it is at {})", crate::util::one_line(&e, 120), path.display()),
+                );
             }
         }
     }
@@ -198,7 +206,10 @@ impl Channels {
         for line in read(&self.outbox).lines().filter(|l| !l.trim().is_empty()) {
             let v: Value = serde_json::from_str(line).unwrap_or_default();
             // older outboxes held Telegram chat ids as "chat"
-            let to = v["to"].as_str().map(String::from).or_else(|| v["chat"].as_i64().filter(|c| *c != 0).map(|c| format!("tg:{c}")));
+            let to = v["to"]
+                .as_str()
+                .map(String::from)
+                .or_else(|| v["chat"].as_i64().filter(|c| *c != 0).map(|c| format!("tg:{c}")));
             let (t, text) = (v["t"].as_u64().unwrap_or(0), v["text"].as_str().unwrap_or(""));
             let Some(to) = to else { continue };
             if self.markup(handle(&to), &format!("(sent late, from {})\n{text}", fmt_time(t)), None) {
@@ -259,7 +270,8 @@ pub fn http() -> ureq::Agent {
 pub fn random_u64() -> u64 {
     use std::sync::atomic::{AtomicU64, Ordering};
     static N: AtomicU64 = AtomicU64::new(0x2545_F491_4F6C_DD1D);
-    let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(0);
+    let t =
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(0);
     let mut z = N.fetch_add(0x9E37_79B9_7F4A_7C15, Ordering::Relaxed) ^ t ^ ((std::process::id() as u64) << 32);
     z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
     z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);

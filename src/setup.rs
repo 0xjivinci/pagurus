@@ -104,7 +104,8 @@ fn free_tool_models(base: &str, key: Option<&str>) -> Vec<String> {
     }
     let Ok(resp) = req.call() else { return vec![] };
     let Ok(v) = resp.into_json::<Value>() else { return vec![] };
-    let local = base.contains("localhost") || base.contains("127.0.0.1") || base.contains(":1234") || base.contains(":11434");
+    let local =
+        base.contains("localhost") || base.contains("127.0.0.1") || base.contains(":1234") || base.contains(":11434");
     if local {
         // LM Studio / Ollama: everything that's installed, minus embedding models
         return v["data"]
@@ -181,7 +182,11 @@ const LAUNCHD_LABEL: &str = "ai.pagurus.daemon";
 /// Discord / Slack / email: secrets go to the env file, only their names to config.toml.
 fn more_channels(home: &Path) -> Result<(), String> {
     let list = |s: &str, num: bool| -> String {
-        let items: Vec<String> = s.split([',', ' ']).filter(|x| !x.is_empty() && (!num || x.parse::<u64>().is_ok())).map(|x| if num { x.to_string() } else { quote(x) }).collect();
+        let items: Vec<String> = s
+            .split([',', ' '])
+            .filter(|x| !x.is_empty() && (!num || x.parse::<u64>().is_ok()))
+            .map(|x| if num { x.to_string() } else { quote(x) })
+            .collect();
         format!("[{}]", items.join(", "))
     };
     if yes("  Discord? (developer portal → bot token; enable MESSAGE CONTENT INTENT; invite the bot)", false) {
@@ -213,11 +218,18 @@ fn more_channels(home: &Path) -> Result<(), String> {
         let port = ask("  SMTP port (465 TLS / 587 STARTTLS)", "465");
         let pass = secret("  password / app password");
         let from = ask("  your own address(es) pagurus should answer", "");
-        if user.is_empty() || imap.is_empty() || pass.is_empty() || !from.contains('@') || port.parse::<u16>().is_err() {
+        if user.is_empty() || imap.is_empty() || pass.is_empty() || !from.contains('@') || port.parse::<u16>().is_err()
+        {
             return Err("email needs a login, hosts, a password and your address".into());
         }
         crate::util::set_env_value(home, "PAGURUS_EMAIL_PASSWORD", &pass)?;
-        for (k, v) in [("username", quote(&user)), ("imap_host", quote(&imap)), ("smtp_host", quote(&smtp)), ("smtp_port", port), ("allowed_senders", list(&from, false))] {
+        for (k, v) in [
+            ("username", quote(&user)),
+            ("imap_host", quote(&imap)),
+            ("smtp_host", quote(&smtp)),
+            ("smtp_port", port),
+            ("allowed_senders", list(&from, false)),
+        ] {
             set_toml(home, "email", k, &v)?;
         }
         eprintln!("  ✓ email configured; only mail from those senders is read or answered");
@@ -230,7 +242,11 @@ fn launchd_plist() -> std::path::PathBuf {
 }
 
 fn uid() -> String {
-    Command::new("id").arg("-u").output().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default()
+    Command::new("id")
+        .arg("-u")
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default()
 }
 
 /// macOS: a launchd agent that starts `pagurus daemon` at login and restarts it
@@ -266,7 +282,10 @@ fn service_macos(home: &Path) -> Result<(), String> {
     let path = launchd_plist();
     write_atomic(&path, &plist)?;
     let domain = format!("gui/{}", uid());
-    let _ = Command::new("launchctl").args(["bootout", &format!("{domain}/{LAUNCHD_LABEL}")]).stderr(Stdio::null()).status();
+    let _ = Command::new("launchctl")
+        .args(["bootout", &format!("{domain}/{LAUNCHD_LABEL}")])
+        .stderr(Stdio::null())
+        .status();
     let ok = Command::new("launchctl").args(["bootstrap", &domain]).arg(&path).status().is_ok_and(|s| s.success());
     if !ok {
         return Err(format!("wrote {} but launchctl couldn't load it; start it with `pagurus daemon`", path.display()));
@@ -288,7 +307,10 @@ fn service_running() -> bool {
             .output()
             .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains("state = running"))
     } else {
-        Command::new("systemctl").args(["--user", "is-active", "--quiet", "pagurus.service"]).status().is_ok_and(|s| s.success())
+        Command::new("systemctl")
+            .args(["--user", "is-active", "--quiet", "pagurus.service"])
+            .status()
+            .is_ok_and(|s| s.success())
     }
 }
 
@@ -298,7 +320,9 @@ pub fn service_cmd(home: &Path, args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str).unwrap_or("status") {
         "install" if mac => service_macos(home),
         "install" if cfg!(target_os = "linux") => service(home),
-        "install" => Err("auto-start is available on Linux (systemd) and macOS (launchd); elsewhere run `pagurus daemon`".into()),
+        "install" => {
+            Err("auto-start is available on Linux (systemd) and macOS (launchd); elsewhere run `pagurus daemon`".into())
+        }
         "remove" if mac => {
             let _ = Command::new("launchctl").args(["bootout", &format!("gui/{}/{LAUNCHD_LABEL}", uid())]).status();
             let _ = std::fs::remove_file(launchd_plist());
@@ -312,7 +336,8 @@ pub fn service_cmd(home: &Path, args: &[String]) -> Result<(), String> {
             Ok(())
         }
         _ => {
-            let installed = if mac { launchd_plist().exists() } else { expand("~/.config/systemd/user/pagurus.service").exists() };
+            let installed =
+                if mac { launchd_plist().exists() } else { expand("~/.config/systemd/user/pagurus.service").exists() };
             println!(
                 "auto-start: {} · running: {}",
                 if installed { "on" } else { "off (pagurus service install)" },
@@ -441,14 +466,17 @@ pub fn run(home: &Path) -> Result<(), String> {
     };
     set_toml(home, "provider", "model", &quote(&model))?;
     let fallbacks: Vec<String> = suggestions.iter().filter(|m| **m != model).take(2).cloned().collect();
-    if !fallbacks.is_empty() && yes(&format!("   use {} as fallbacks when it's rate-limited?", fallbacks.join(" and ")), true) {
+    if !fallbacks.is_empty()
+        && yes(&format!("   use {} as fallbacks when it's rate-limited?", fallbacks.join(" and ")), true)
+    {
         let list = fallbacks.iter().map(|m| quote(m)).collect::<Vec<_>>().join(", ");
         set_toml(home, "provider", "fallback_models", &format!("[{list}]"))?;
     }
 
     eprint!("   testing the model… ");
     let cfg = config::load(home)?;
-    let test = Llm::new(&cfg.provider).and_then(|l| l.chat(&[Msg::system("Reply with exactly: ok"), Msg::user("ping")], &json!([])));
+    let test = Llm::new(&cfg.provider)
+        .and_then(|l| l.chat(&[Msg::system("Reply with exactly: ok"), Msg::user("ping")], &json!([])));
     match test {
         Ok(r) => eprintln!("✓ it answered: {}", one_line(r.content.as_deref().unwrap_or(""), 60)),
         Err(e) => eprintln!("✗ {}\n   fix base_url/model/key, then run `pagurus doctor`", one_line(&e, 200)),
@@ -466,13 +494,16 @@ pub fn run(home: &Path) -> Result<(), String> {
         }
     }
 
-    let has_systemd = cfg!(target_os = "linux") && Command::new("systemctl").arg("--version").stdout(Stdio::null()).status().is_ok();
+    let has_systemd =
+        cfg!(target_os = "linux") && Command::new("systemctl").arg("--version").stdout(Stdio::null()).status().is_ok();
     if has_systemd && yes("\n3) Run pagurus in the background as a service (starts on boot)?", true) {
         if let Err(e) = service(home) {
             eprintln!("  ✗ {e}");
         }
     }
-    if cfg!(target_os = "macos") && yes("\n3) Start pagurus automatically when you log in (and restart it if it stops)?", true) {
+    if cfg!(target_os = "macos")
+        && yes("\n3) Start pagurus automatically when you log in (and restart it if it stops)?", true)
+    {
         if let Err(e) = service_macos(home) {
             eprintln!("  ✗ {e}");
         }
@@ -483,7 +514,9 @@ pub fn run(home: &Path) -> Result<(), String> {
              start its server automatically and load your model, or run `lms server start` and `lms load <model>` after a restart."
         );
     }
-    eprintln!("\nDone. Next: `pagurus` to chat · `pagurus doctor` to check · `pagurus eval` to test learning with your model");
+    eprintln!(
+        "\nDone. Next: `pagurus` to chat · `pagurus doctor` to check · `pagurus eval` to test learning with your model"
+    );
     Ok(())
 }
 

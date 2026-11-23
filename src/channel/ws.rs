@@ -244,7 +244,9 @@ mod tests {
         let fake = Fake { input: std::io::Cursor::new(input), out: Vec::new() };
         let mut ws = Ws::handshake(fake, "gateway.example", "/?v=10").unwrap();
         let req = String::from_utf8_lossy(&ws.s.out).to_string();
-        assert!(req.starts_with("GET /?v=10 HTTP/1.1\r\nHost: gateway.example\r\n") && req.contains("Sec-WebSocket-Key: "));
+        assert!(
+            req.starts_with("GET /?v=10 HTTP/1.1\r\nHost: gateway.example\r\n") && req.contains("Sec-WebSocket-Key: ")
+        );
         ws.s.out.clear();
         assert_eq!(ws.read().unwrap(), Some(Msg::Text("hello".into())));
         let (_, op, payload, _) = parse(&ws.s.out).unwrap().unwrap();

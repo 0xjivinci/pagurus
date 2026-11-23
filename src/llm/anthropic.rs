@@ -42,7 +42,8 @@ fn image(url: &str) -> Value {
 /// providers earlier in the conversation (fallback chains) are mapped the same
 /// way on both the call and its result.
 fn tool_id(id: &str, n: usize) -> String {
-    let s: String = id.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect();
+    let s: String =
+        id.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect();
     if s.is_empty() {
         format!("toolu_{n}")
     } else {
@@ -112,7 +113,11 @@ pub fn body(model: &str, max_tokens: u32, msgs: &[Msg], tools: &Value) -> Value 
                 content.extend(m.images.iter().map(|u| image(u)));
                 if let Some(i) = pending.iter().position(|p| *p == id) {
                     pending.remove(i);
-                    push(&mut out, "user", vec![json!({ "type": "tool_result", "tool_use_id": id, "content": content })]);
+                    push(
+                        &mut out,
+                        "user",
+                        vec![json!({ "type": "tool_result", "tool_use_id": id, "content": content })],
+                    );
                 } else {
                     // its call fell out of the window: keep the output as plain text
                     content[0] = text(&format!("[tool result] {t}"));
@@ -130,7 +135,9 @@ pub fn body(model: &str, max_tokens: u32, msgs: &[Msg], tools: &Value) -> Value 
         }
     }
     if !pending.is_empty() {
-        let r = pending.drain(..).map(|id| json!({ "type": "tool_result", "tool_use_id": id, "content": "(no result recorded)" }));
+        let r = pending
+            .drain(..)
+            .map(|id| json!({ "type": "tool_result", "tool_use_id": id, "content": "(no result recorded)" }));
         push(&mut out, "user", r.collect());
     }
     if out.first().is_some_and(|(r, _)| r == "assistant") {
@@ -144,7 +151,8 @@ pub fn body(model: &str, max_tokens: u32, msgs: &[Msg], tools: &Value) -> Value 
             b["cache_control"] = cache();
         }
     }
-    let messages: Vec<Value> = out.into_iter().map(|(role, content)| json!({ "role": role, "content": content })).collect();
+    let messages: Vec<Value> =
+        out.into_iter().map(|(role, content)| json!({ "role": role, "content": content })).collect();
     let mut body = json!({ "model": model, "max_tokens": max_tokens, "messages": messages });
     if !system.is_empty() {
         body["system"] = Value::Array(system);
@@ -209,14 +217,20 @@ mod tests {
     use serde_json::json;
 
     fn call(id: &str, name: &str, args: &str) -> ToolCall {
-        ToolCall { id: id.into(), kind: "function".into(), function: FnCall { name: name.into(), arguments: args.into() }, extra: Default::default() }
+        ToolCall {
+            id: id.into(),
+            kind: "function".into(),
+            function: FnCall { name: name.into(), arguments: args.into() },
+            extra: Default::default(),
+        }
     }
 
     #[test]
     fn maps_messages_tools_images_and_cache_breakpoints() {
         let sys = format!("{}\n\nSession started Monday 09:00.\n", "You are pagurus. ".repeat(50));
         let mut asst = Msg::assistant("");
-        asst.tool_calls = Some(vec![call("functions.shell:0", "shell", r#"{"command":"uptime"}"#), call("c2", "read_file", "{}")]);
+        asst.tool_calls =
+            Some(vec![call("functions.shell:0", "shell", r#"{"command":"uptime"}"#), call("c2", "read_file", "{}")]);
         let msgs = vec![
             Msg::system(&sys),
             Msg::user_with_images("what is this?", vec!["data:image/png;base64,AAAA".into()]),

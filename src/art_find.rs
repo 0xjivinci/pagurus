@@ -3,7 +3,9 @@
 //! the same people, collections by contract, and fuzzy name search. Everything
 //! ranks by *different collectors*, the measure that's hardest to fake.
 
-use crate::art::{flag_of, gql, gql_pages, holder_label, num, profile_url, sale, tez, BURN, NOTE, SALE_FIELDS, SALE_FILTER};
+use crate::art::{
+    flag_of, gql, gql_pages, holder_label, num, profile_url, sale, tez, BURN, NOTE, SALE_FIELDS, SALE_FILTER,
+};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 
@@ -74,7 +76,8 @@ pub fn search(who: &str) -> Result<Vec<Value>, String> {
 /// The one profile a fuzzy search clearly points to, or the candidates to choose from.
 pub fn best_match(who: &str) -> Result<Value, String> {
     let c = search(who)?;
-    let artists: Vec<&Value> = c.iter().filter(|h| h["created_tokens"].as_array().is_some_and(|a| !a.is_empty())).collect();
+    let artists: Vec<&Value> =
+        c.iter().filter(|h| h["created_tokens"].as_array().is_some_and(|a| !a.is_empty())).collect();
     match (artists.len(), c.len()) {
         (_, 0) => Err(format!("no objkt profile matches \"{who}\"; try their tz… address, .tez name or X handle")),
         (1, _) => Ok(artists[0].clone()),
@@ -128,7 +131,10 @@ fn sales_between(from: &str, to: &str, limit: usize, extra: &str) -> Result<Vec<
         "query($from: timestamptz!, $to: timestamptz!, $n: Int!) {{ event(where: {{timestamp: {{_gte: $from, _lt: $to}}, \
          {SALE_FILTER}{extra}}}, order_by: {{timestamp: desc}}, limit: $n) {{ {SALE_FIELDS} {CREATOR_FIELDS} }} }}"
     );
-    let rows = gql(&q, json!({ "from": from, "to": to, "n": limit.min(500) }))?["event"].as_array().cloned().unwrap_or_default();
+    let rows = gql(&q, json!({ "from": from, "to": to, "n": limit.min(500) }))?["event"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
     Ok(rows.into_iter().map(|e| (sale(&e), e["token"]["creators"].get(0).cloned().unwrap_or(Value::Null))).collect())
 }
 
@@ -173,7 +179,8 @@ fn active_since(addrs: &[String], from: &str) -> Result<(HashSet<String>, HashSe
         "query($a: [String!]!, $from: timestamptz!) {{ event(where: {{token: {{creators: {{creator_address: {{_in: $a}}}}}}, \
          timestamp: {{_gte: $from}}, {SALE_FILTER}}}, limit: 500) {{ token {{ creators {{ creator_address }} }} }} }}"
     );
-    let minted_q = "query($a: [String!]!, $from: timestamptz!) { token(where: {creators: {creator_address: {_in: $a}}, \
+    let minted_q =
+        "query($a: [String!]!, $from: timestamptz!) { token(where: {creators: {creator_address: {_in: $a}}, \
         timestamp: {_gte: $from}}, limit: 500) { creators { creator_address } } }";
     let creators = |rows: &Value, path: &dyn Fn(&Value) -> Value| -> HashSet<String> {
         rows.as_array()
@@ -250,12 +257,16 @@ pub fn newcomers(started_days: u64, n: usize) -> Result<String, String> {
             .cloned()
             .unwrap_or_default()
             .into_iter()
-            .filter_map(|h| Some((h["address"].as_str()?.to_string(), h["created_tokens"][0]["token"]["timestamp"].clone())))
+            .filter_map(|h| {
+                Some((h["address"].as_str()?.to_string(), h["created_tokens"][0]["token"]["timestamp"].clone()))
+            })
             .collect()
     };
     let fresh: Vec<&(String, Stat)> =
         cands.iter().filter(|(a, _)| first.get(a).and_then(days_ago).is_some_and(|d| d <= started_days)).collect();
-    let mut out = format!("{NOTE}\nNewcomers: first mint in the last {started_days} days, already collected by 2+ different people:\n");
+    let mut out = format!(
+        "{NOTE}\nNewcomers: first mint in the last {started_days} days, already collected by 2+ different people:\n"
+    );
     for (a, st) in fresh.iter().take(n.clamp(1, 25)) {
         out += &format!(
             "- {} · first mint {} · {} collectors · {} sales, {} · {}\n",
@@ -278,7 +289,10 @@ pub fn newcomers(started_days: u64, n: usize) -> Result<String, String> {
 pub fn style(tag: &str, days: u64, n: usize) -> Result<String, String> {
     let tag = tag.trim().trim_start_matches('#');
     if tag.len() < 2 {
-        return Err("say which style or tag, e.g. generative, pixelart, photography, glitch, landscape, p5js, illustration".into());
+        return Err(
+            "say which style or tag, e.g. generative, pixelart, photography, glitch, landscape, p5js, illustration"
+                .into(),
+        );
     }
     let days = days.clamp(1, 90);
     // 1. artworks with that exact tag minted in the last 90 days (the indexed, fast way to ask)
@@ -290,7 +304,9 @@ pub fn style(tag: &str, days: u64, n: usize) -> Result<String, String> {
         if !seen.insert(t.clone()) {
             continue;
         }
-        for x in gql(tok_q, json!({ "tag": t, "from": iso_days_ago(90) }))?["token"].as_array().cloned().unwrap_or_default() {
+        for x in
+            gql(tok_q, json!({ "tag": t, "from": iso_days_ago(90) }))?["token"].as_array().cloned().unwrap_or_default()
+        {
             if let Some(pk) = x["pk"].as_i64().or_else(|| x["pk"].as_str().and_then(|p| p.parse().ok())) {
                 pks.push(pk);
             }
@@ -344,8 +360,17 @@ pub fn style(tag: &str, days: u64, n: usize) -> Result<String, String> {
 /// Spellings artists use for one style: voxel → voxel, voxels, voxelart.
 fn tag_variants(tag: &str) -> Vec<String> {
     let t = tag.to_lowercase();
-    let stem = t.strip_suffix("art").filter(|s| s.len() >= 3).unwrap_or(&t).trim_end_matches(['-', '_', ' ']).to_string();
-    let mut v = vec![tag.to_string(), t.clone(), stem.clone(), format!("{stem}art"), format!("{stem}s"), format!("{stem}-art"), format!("{stem} art")];
+    let stem =
+        t.strip_suffix("art").filter(|s| s.len() >= 3).unwrap_or(&t).trim_end_matches(['-', '_', ' ']).to_string();
+    let mut v = vec![
+        tag.to_string(),
+        t.clone(),
+        stem.clone(),
+        format!("{stem}art"),
+        format!("{stem}s"),
+        format!("{stem}-art"),
+        format!("{stem} art"),
+    ];
     let mut seen = HashSet::new();
     v.retain(|x| x.len() >= 2 && seen.insert(x.clone()));
     v
@@ -357,7 +382,8 @@ fn tag_variants(tag: &str) -> Vec<String> {
 fn makers(tag: &str, shown: &HashSet<String>, n: usize) -> Result<String, String> {
     let tags = tag_variants(tag);
     let low = tag.to_lowercase();
-    let stem = low.strip_suffix("art").filter(|s| s.len() >= 3).unwrap_or(&low).trim_end_matches(['-', '_', ' ']).to_string();
+    let stem =
+        low.strip_suffix("art").filter(|s| s.len() >= 3).unwrap_or(&low).trim_end_matches(['-', '_', ' ']).to_string();
     const WHO: &str = "pk timestamp creators { creator_address holder { alias tzdomain flag flag_reason } }";
     let tq = format!(
         "query($tags: [String!]!) {{ token(where: {{tags: {{tag: {{name: {{_in: $tags}}}}}}, supply: {{_gt: 0}}}}, \
@@ -391,7 +417,10 @@ fn makers(tag: &str, shown: &HashSet<String>, n: usize) -> Result<String, String
         }
     }
     if by.is_empty() {
-        return Ok(format!("No artist on objkt tagged or titled work \"{stem}\" (tried {}). Try a related style.\n", tags.join(", ")));
+        return Ok(format!(
+            "No artist on objkt tagged or titled work \"{stem}\" (tried {}). Try a related style.\n",
+            tags.join(", ")
+        ));
     }
     // who collected these very works (any date): the style's real audience
     // in batches: one query over hundreds of works times out on objkt
@@ -405,11 +434,13 @@ fn makers(tag: &str, shown: &HashSet<String>, n: usize) -> Result<String, String
             Err(_) => failed += 1,
         }
     }
-    let note = if failed > 0 { format!("(sales of {failed} batch(es) of works couldn't be loaded: counts are low)\n") } else { String::new() };
-    let rows: Vec<(Value, Value)> = events
-        .into_iter()
-        .map(|e| (sale(&e), e["token"]["creators"].get(0).cloned().unwrap_or(Value::Null)))
-        .collect();
+    let note = if failed > 0 {
+        format!("(sales of {failed} batch(es) of works couldn't be loaded: counts are low)\n")
+    } else {
+        String::new()
+    };
+    let rows: Vec<(Value, Value)> =
+        events.into_iter().map(|e| (sale(&e), e["token"]["creators"].get(0).cloned().unwrap_or(Value::Null))).collect();
     let stats = tally(&rows);
     let mut list: Vec<(String, usize, usize, i64, String, String)> = by
         .keys()
@@ -470,7 +501,8 @@ pub fn similar(who: &str, n: usize) -> Result<String, String> {
         let e = shared.entry(a.to_string()).or_insert_with(|| (HashSet::new(), holder_label(&cr["holder"], a)));
         e.0.insert(r["holder_address"].as_str().unwrap_or("").to_string());
     }
-    let mut list: Vec<(String, (HashSet<String>, String))> = shared.into_iter().filter(|(_, (c, _))| c.len() >= 2).collect();
+    let mut list: Vec<(String, (HashSet<String>, String))> =
+        shared.into_iter().filter(|(_, (c, _))| c.len() >= 2).collect();
     list.sort_by_key(|x| std::cmp::Reverse(x.1 .0.len()));
     let mut out = format!(
         "{NOTE}\nArtists collected by the same people as {} (out of their {} main collectors):\n",

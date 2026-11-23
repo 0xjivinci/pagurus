@@ -53,7 +53,10 @@ pub fn replace(text: &str, old: &str, new: &str, all: bool) -> Result<(String, S
             out += &lines[end..].concat();
             Ok((out, format!("at line {} (matched ignoring whitespace/quote differences)", i + 1)))
         }
-        [] => Err("old_string not found (not even ignoring whitespace); read_file the area and copy the text exactly".into()),
+        [] => {
+            Err("old_string not found (not even ignoring whitespace); read_file the area and copy the text exactly"
+                .into())
+        }
         many => Err(format!(
             "old_string matches {} places ignoring whitespace (lines {}); include more context",
             many.len(),
@@ -93,7 +96,13 @@ pub fn edit_many(home: &Path, p: &Path, edits: &[(String, String, bool)]) -> Res
     let mut text = before.clone();
     let mut hows = Vec::new();
     for (i, (old, new, all)) in edits.iter().enumerate() {
-        let (out, how) = replace(&text, old, new, *all).map_err(|e| if edits.len() > 1 { format!("edit {}: {e} (nothing was changed)", i + 1) } else { e })?;
+        let (out, how) = replace(&text, old, new, *all).map_err(|e| {
+            if edits.len() > 1 {
+                format!("edit {}: {e} (nothing was changed)", i + 1)
+            } else {
+                e
+            }
+        })?;
         text = out;
         hows.push(how);
     }
@@ -103,7 +112,11 @@ pub fn edit_many(home: &Path, p: &Path, edits: &[(String, String, bool)]) -> Res
     let id = checkpoint(home, p);
     std::fs::write(p, &text).map_err(|e| e.to_string())?;
     let how = if hows.len() == 1 { hows.remove(0) } else { format!("({} edits)", hows.len()) };
-    Ok((format!("edited {} {how}{}", p.display(), id.map(|i| format!(" (undo: /rollback {i})")).unwrap_or_default()), before, text))
+    Ok((
+        format!("edited {} {how}{}", p.display(), id.map(|i| format!(" (undo: /rollback {i})")).unwrap_or_default()),
+        before,
+        text,
+    ))
 }
 
 // ---------- checkpoints ----------
@@ -317,7 +330,10 @@ mod tests {
             checkpoint(&h, &f);
         }
         assert_eq!(index(&h).len(), KEEP);
-        let baks = std::fs::read_dir(dir(&h)).unwrap().filter(|e| e.as_ref().unwrap().path().extension().is_some_and(|x| x == "bak")).count();
+        let baks = std::fs::read_dir(dir(&h))
+            .unwrap()
+            .filter(|e| e.as_ref().unwrap().path().extension().is_some_and(|x| x == "bak"))
+            .count();
         assert!(baks <= KEEP, "old snapshots are pruned ({baks})");
     }
 
@@ -342,8 +358,12 @@ mod tests {
         use crate::tools::{definitions, execute, Ctx, Set};
         let h = home();
         let cfg = crate::config::Config::default();
-        let names: Vec<String> =
-            definitions(&cfg, Set::Full).as_array().unwrap().iter().map(|d| d["function"]["name"].as_str().unwrap().into()).collect();
+        let names: Vec<String> = definitions(&cfg, Set::Full)
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|d| d["function"]["name"].as_str().unwrap().into())
+            .collect();
         for t in ["edit_file", "clarify", "process"] {
             assert!(names.contains(&t.to_string()), "{t} offered");
         }
@@ -352,14 +372,16 @@ mod tests {
         let r = execute(&ctx, Set::Full, "edit_file", r#"{"path":"a.txt","old_string":"world","new_string":"pi"}"#);
         assert!(r.starts_with("edited") && r.contains("/rollback 2"), "{r}");
         assert_eq!(read(&h.join("workspace/a.txt")), "hello pi\n");
-        assert!(execute(&ctx, Set::Full, "edit_file", r#"{"path":"/etc/hosts","old_string":"a","new_string":"b"}"#).starts_with("error"));
+        assert!(execute(&ctx, Set::Full, "edit_file", r#"{"path":"/etc/hosts","old_string":"a","new_string":"b"}"#)
+            .starts_with("error"));
         let r = execute(&ctx, Set::Full, "process", r#"{"action":"start","command":"sleep 5"}"#);
         assert!(r.contains("nobody can approve"), "unattended: never started ({r})");
         assert!(execute(&ctx, Set::Sub, "process", r#"{"action":"list"}"#).contains("not available"));
         assert!(execute(&ctx, Set::Full, "clarify", r#"{"question":"which?"}"#).contains("unattended"));
         let no = |_: &str| false;
         let ctx = Ctx { approver: Some(&no), ..ctx };
-        assert!(execute(&ctx, Set::Full, "process", r#"{"action":"start","command":"sleep 5"}"#).contains("did not approve"));
+        assert!(execute(&ctx, Set::Full, "process", r#"{"action":"start","command":"sleep 5"}"#)
+            .contains("did not approve"));
         // a long listing is spilled, not cut off
         let big: String = (0..2000).map(|i| format!("row {i}\n")).collect();
         std::fs::write(h.join("workspace/big.txt"), &big).unwrap();

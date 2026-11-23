@@ -112,7 +112,10 @@ pub fn check(home: &Path, c: &Config) -> Result<(), String> {
         if !matches!(h.host_key_check.as_str(), "accept-new" | "yes") {
             return bad("host_key_check must be accept-new or yes");
         }
-        if h.identity_file.as_deref().is_some_and(|p| p.trim().is_empty() || p.chars().any(char::is_control) || p.contains("PRIVATE KEY")) {
+        if h.identity_file
+            .as_deref()
+            .is_some_and(|p| p.trim().is_empty() || p.chars().any(char::is_control) || p.contains("PRIVATE KEY"))
+        {
             return bad("identity_file must be the path of a key file");
         }
     }
@@ -135,14 +138,19 @@ pub fn check(home: &Path, c: &Config) -> Result<(), String> {
     }
     for m in &s.mounts {
         let parts: Vec<&str> = m.split(':').collect();
-        let ok = parts.len() == 2 && parts.iter().all(|p| p.starts_with('/') && !p.contains(',') && !p.chars().any(char::is_control));
+        let ok = parts.len() == 2
+            && parts.iter().all(|p| p.starts_with('/') && !p.contains(',') && !p.chars().any(char::is_control));
         if !ok || parts[1] == "/workspace" {
             return bad(format!("mount `{m}` must be /host/path:/container/path (no , and not /workspace)"));
         }
         let src = Path::new(parts[0]);
         let user_home = std::env::var_os("HOME").map(PathBuf::from);
         let covers = |x: &Path| x.starts_with(src);
-        if tools::looks_secret(home, parts[0]) || covers(home) || src == Path::new("/") || user_home.as_deref().is_some_and(covers) {
+        if tools::looks_secret(home, parts[0])
+            || covers(home)
+            || src == Path::new("/")
+            || user_home.as_deref().is_some_and(covers)
+        {
             return bad(format!("mount `{m}` would expose pagurus's keys, ~/.ssh or the whole system"));
         }
     }
@@ -153,10 +161,12 @@ pub fn check(home: &Path, c: &Config) -> Result<(), String> {
 pub fn shell_params(cfg: &Config, params: &mut Value) {
     if !cfg.hosts.is_empty() {
         let names: Vec<&str> = cfg.hosts.iter().map(|h| h.name.as_str()).collect();
-        params["properties"]["host"] = json!({"type":"string","enum":names,"description":"run over ssh on this machine instead"});
+        params["properties"]["host"] =
+            json!({"type":"string","enum":names,"description":"run over ssh on this machine instead"});
     }
     if cfg.sandbox.on() {
-        params["properties"]["sandbox"] = json!({"type":"boolean","description":"run in a throwaway docker container (workspace at /workspace)"});
+        params["properties"]["sandbox"] =
+            json!({"type":"boolean","description":"run in a throwaway docker container (workspace at /workspace)"});
     }
 }
 
@@ -179,7 +189,11 @@ pub fn about(cfg: &Config) -> String {
             sb.docker_image,
             if sb.network { "on" } else { "off" },
             if sb.auto() { " without asking the user" } else { "" },
-            if sb.route_writes { " Commands that would need approval here go there unless you pass `sandbox: false`." } else { "" },
+            if sb.route_writes {
+                " Commands that would need approval here go there unless you pass `sandbox: false`."
+            } else {
+                ""
+            },
         );
     }
     s
@@ -191,13 +205,20 @@ pub fn shell(ctx: &Ctx, a: &Value, cmd: &str) -> Option<Result<String, String>> 
     if let Some(name) = a["host"].as_str().filter(|n| !n.is_empty()) {
         let r = match cfg.hosts.iter().find(|h| h.name == name) {
             Some(h) => on_host(ctx, h, cmd),
-            None => Err(format!("no host `{name}`; configured: {}", cfg.hosts.iter().map(|h| h.name.as_str()).collect::<Vec<_>>().join(", "))),
+            None => Err(format!(
+                "no host `{name}`; configured: {}",
+                cfg.hosts.iter().map(|h| h.name.as_str()).collect::<Vec<_>>().join(", ")
+            )),
         };
         return Some(r);
     }
     let sandbox = match a["sandbox"].as_bool() {
         Some(b) => b,
-        None => cfg.sandbox.route_writes && cfg.sandbox.on() && tools::gate(ctx.home, &cfg.tools.shell_allow, cmd, false).is_some(),
+        None => {
+            cfg.sandbox.route_writes
+                && cfg.sandbox.on()
+                && tools::gate(ctx.home, &cfg.tools.shell_allow, cmd, false).is_some()
+        }
     };
     if !sandbox {
         return None;
@@ -220,7 +241,8 @@ fn on_host(ctx: &Ctx, h: &Host, cmd: &str) -> Result<String, String> {
         tools::approve(ctx, &why, &format!("{cmd}\n(over ssh on host `{}` = {})", h.name, h.target))?;
     }
     let timeout = h.timeout_secs.unwrap_or(ctx.cfg.tools.shell_timeout_secs);
-    let out = tools::run_command(argv_command(&ssh_argv(ctx.home, h, cmd)), &ctx.home.join("workspace"), timeout, &|| {})?;
+    let out =
+        tools::run_command(argv_command(&ssh_argv(ctx.home, h, cmd)), &ctx.home.join("workspace"), timeout, &|| {})?;
     Ok(format!("[{}] {out}", h.name))
 }
 
@@ -264,7 +286,8 @@ pub fn ssh_argv(home: &Path, h: &Host, cmd: &str) -> Vec<String> {
     o("BatchMode=yes".into());
     o(format!("ConnectTimeout={}", h.connect_timeout_secs.max(1)));
     o(format!("StrictHostKeyChecking={}", h.host_key_check));
-    for x in ["LogLevel=ERROR", "ForwardAgent=no", "ForwardX11=no", "ClearAllForwardings=yes", "PermitLocalCommand=no"] {
+    for x in ["LogLevel=ERROR", "ForwardAgent=no", "ForwardX11=no", "ClearAllForwardings=yes", "PermitLocalCommand=no"]
+    {
         o(x.into());
     }
     if let Some(d) = control_dir(home) {
@@ -283,7 +306,12 @@ pub fn ssh_argv(home: &Path, h: &Host, cmd: &str) -> Vec<String> {
         v.extend(["-p".into(), p.to_string()]);
     }
     if let Some(id) = &h.identity_file {
-        v.extend(["-i".into(), crate::util::expand(id).to_string_lossy().into_owned(), "-o".into(), "IdentitiesOnly=yes".into()]);
+        v.extend([
+            "-i".into(),
+            crate::util::expand(id).to_string_lossy().into_owned(),
+            "-o".into(),
+            "IdentitiesOnly=yes".into(),
+        ]);
     }
     v.extend(["--".into(), h.target.clone(), format!("sh -c {}", sh_quote(cmd))]);
     v
@@ -305,15 +333,22 @@ fn owner(ws: &Path) -> Option<(u32, u32)> {
 
 /// `docker run --rm …`: no capabilities beyond file ownership, no privilege gain,
 /// limited memory/CPU/processes, only the workspace writable, the command after the image.
-pub fn docker_argv(sb: &Sandbox, ws: &Path, name: &str, user: Option<(u32, u32)>, cmd: &str) -> Result<Vec<String>, String> {
+pub fn docker_argv(
+    sb: &Sandbox,
+    ws: &Path,
+    name: &str,
+    user: Option<(u32, u32)>,
+    cmd: &str,
+) -> Result<Vec<String>, String> {
     let ws = ws.to_string_lossy();
     if ws.contains([',', ':']) {
         return Err(format!("the workspace path {ws} can't be mounted (contains , or :)"));
     }
-    let mut v: Vec<String> = ["docker", "run", "--rm", "--name", name, "--network", if sb.network { "bridge" } else { "none" }]
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
+    let mut v: Vec<String> =
+        ["docker", "run", "--rm", "--name", name, "--network", if sb.network { "bridge" } else { "none" }]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
     for x in ["--memory", &sb.memory, "--cpus", &sb.cpus, "--pids-limit", "256", "--cap-drop", "ALL"] {
         v.push(x.into());
     }
@@ -331,7 +366,15 @@ pub fn docker_argv(sb: &Sandbox, ws: &Path, name: &str, user: Option<(u32, u32)>
             v.extend(["--mount".into(), format!("type=bind,source={src},target={dst},readonly")]);
         }
     }
-    v.extend(["-w".into(), "/workspace".into(), "--".into(), sb.docker_image.clone(), "sh".into(), "-c".into(), cmd.into()]);
+    v.extend([
+        "-w".into(),
+        "/workspace".into(),
+        "--".into(),
+        sb.docker_image.clone(),
+        "sh".into(),
+        "-c".into(),
+        cmd.into(),
+    ]);
     Ok(v)
 }
 
@@ -403,15 +446,24 @@ pub fn status(cfg: &Config) -> Vec<String> {
     )];
     if cfg.sandbox.on() {
         let tmp = std::env::temp_dir();
-        let argv: Vec<String> = ["docker", "info", "--format", "{{.ServerVersion}}"].iter().map(|s| s.to_string()).collect();
-        let out = if docker { tools::run_command(argv_command(&argv), &tmp, 8, &|| {}).unwrap_or_else(|e| e) } else { "no docker".into() };
+        let argv: Vec<String> =
+            ["docker", "info", "--format", "{{.ServerVersion}}"].iter().map(|s| s.to_string()).collect();
+        let out = if docker {
+            tools::run_command(argv_command(&argv), &tmp, 8, &|| {}).unwrap_or_else(|e| e)
+        } else {
+            "no docker".into()
+        };
         let up = docker && !out.contains('[') && !out.to_lowercase().contains("error");
         v.push(format!(
             "{}sandbox    {} · network {} · {}",
             if up { "ok " } else { "!! " },
             cfg.sandbox.docker_image,
             if cfg.sandbox.network { "on" } else { "off" },
-            if up { format!("docker {}", out.trim()) } else { format!("docker not usable: {}", crate::util::one_line(&out, 100)) }
+            if up {
+                format!("docker {}", out.trim())
+            } else {
+                format!("docker not usable: {}", crate::util::one_line(&out, 100))
+            }
         ));
     }
     v
@@ -425,12 +477,18 @@ pub fn cli(home: &Path, cfg: &Config, args: &[String]) -> Result<(), String> {
                 println!("no hosts; add [[host]] entries to config.toml (see README: Other machines)");
             }
             for h in &cfg.hosts {
-                let allow = h.shell_allow.as_ref().map_or("tools.shell_allow".to_string(), |a| format!("{} commands", a.len()));
+                let allow =
+                    h.shell_allow.as_ref().map_or("tools.shell_allow".to_string(), |a| format!("{} commands", a.len()));
                 let port = h.port.map(|p| format!(":{p}")).unwrap_or_default();
                 println!("{:<12} {}{port}  approve {} · read-only: {allow}", h.name, h.target, h.approve);
             }
             if cfg.sandbox.on() {
-                println!("{:<12} docker {} (network {})", "(sandbox)", cfg.sandbox.docker_image, if cfg.sandbox.network { "on" } else { "off" });
+                println!(
+                    "{:<12} docker {} (network {})",
+                    "(sandbox)",
+                    cfg.sandbox.docker_image,
+                    if cfg.sandbox.network { "on" } else { "off" }
+                );
             }
             Ok(())
         }
@@ -438,7 +496,12 @@ pub fn cli(home: &Path, cfg: &Config, args: &[String]) -> Result<(), String> {
             let name = args.get(1).ok_or("usage: pagurus host test <name>")?;
             let h = cfg.hosts.iter().find(|h| &h.name == name).ok_or_else(|| format!("no host `{name}`"))?;
             let t = std::time::Instant::now();
-            let out = tools::run_command(argv_command(&ssh_argv(home, h, "uname -srm")), &home.join("workspace"), 30, &|| {})?;
+            let out = tools::run_command(
+                argv_command(&ssh_argv(home, h, "uname -srm")),
+                &home.join("workspace"),
+                30,
+                &|| {},
+            )?;
             let out = crate::util::redact(out.trim());
             if out.contains("[exit") || out.contains("[killed") {
                 return Err(format!("{name}: {out}"));
@@ -459,7 +522,8 @@ mod tests {
     }
 
     fn gate(cmd: &str) -> Option<String> {
-        let allow: Vec<String> = ["ls", "cat", "grep", "rg", "uptime", "df", "head"].iter().map(|s| s.to_string()).collect();
+        let allow: Vec<String> =
+            ["ls", "cat", "grep", "rg", "uptime", "df", "head"].iter().map(|s| s.to_string()).collect();
         tools::gate(Path::new("/h"), &allow, cmd, true)
     }
 
@@ -469,9 +533,23 @@ mod tests {
             assert_eq!(gate(ok), None, "{ok}");
         }
         for bad in [
-            "rm -rf /", "uptime; reboot", "ls $(id)", "cat ~/.ssh/id_ed25519", "cat ~/.s*/id*", "cat /home/*/.[s]sh/*",
-            "ls ~/.*", "grep -r KEY ~", "grep -r KEY .", "rg KEY", "grep -r x /home", "cat ~root/x", "cat /proc/1/environ",
-            "ls > /tmp/x", "uptime & reboot", "cat ../x", "printenv",
+            "rm -rf /",
+            "uptime; reboot",
+            "ls $(id)",
+            "cat ~/.ssh/id_ed25519",
+            "cat ~/.s*/id*",
+            "cat /home/*/.[s]sh/*",
+            "ls ~/.*",
+            "grep -r KEY ~",
+            "grep -r KEY .",
+            "rg KEY",
+            "grep -r x /home",
+            "cat ~root/x",
+            "cat /proc/1/environ",
+            "ls > /tmp/x",
+            "uptime & reboot",
+            "cat ../x",
+            "printenv",
         ] {
             assert!(gate(bad).is_some(), "{bad}");
         }
@@ -518,7 +596,14 @@ mod tests {
         c.hosts = vec![];
         c.sandbox.docker_image = "debian:bookworm-slim".into();
         assert!(check(home, &c).is_ok());
-        for (img, mount) in [("--privileged", ""), ("x", "/:/host"), ("x", "/h:/h"), ("x", "/srv,x:/y"), ("x", "/srv:/workspace"), ("x", "/home/me/.ssh:/k")] {
+        for (img, mount) in [
+            ("--privileged", ""),
+            ("x", "/:/host"),
+            ("x", "/h:/h"),
+            ("x", "/srv,x:/y"),
+            ("x", "/srv:/workspace"),
+            ("x", "/home/me/.ssh:/k"),
+        ] {
             c.sandbox.docker_image = img.into();
             c.sandbox.mounts = if mount.is_empty() { vec![] } else { vec![mount.into()] };
             assert!(check(home, &c).is_err(), "{img} {mount}");
@@ -527,14 +612,25 @@ mod tests {
 
     #[test]
     fn sandbox_command_line() {
-        let sb = Sandbox { docker_image: "alpine:3".into(), mounts: vec!["/srv/data:/data".into()], ..Default::default() };
+        let sb =
+            Sandbox { docker_image: "alpine:3".into(), mounts: vec!["/srv/data:/data".into()], ..Default::default() };
         let cmd = "echo hi; rm -rf / --privileged";
         let v = docker_argv(&sb, Path::new("/w/ws"), "pagurus-sandbox-1", Some((1000, 1000)), cmd).unwrap();
         let i = v.iter().position(|a| a == "--").unwrap();
         assert_eq!(&v[i + 1..], ["alpine:3", "sh", "-c", cmd]);
         let opts = v[..i].join(" ");
-        for want in ["--rm", "--network none", "--memory 512m", "--cpus 1", "--pids-limit 256", "--cap-drop ALL", "no-new-privileges",
-            "--user 1000:1000", "type=bind,source=/w/ws,target=/workspace", "source=/srv/data,target=/data,readonly"] {
+        for want in [
+            "--rm",
+            "--network none",
+            "--memory 512m",
+            "--cpus 1",
+            "--pids-limit 256",
+            "--cap-drop ALL",
+            "no-new-privileges",
+            "--user 1000:1000",
+            "type=bind,source=/w/ws,target=/workspace",
+            "source=/srv/data,target=/data,readonly",
+        ] {
             assert!(opts.contains(want), "{want} missing in {opts}");
         }
         assert!(!opts.contains("privileged") && !opts.contains("rm -rf"));
@@ -550,7 +646,10 @@ mod tests {
         let home = std::env::temp_dir().join(format!("pagurus-remote-{}", crate::util::new_id()));
         std::fs::create_dir_all(home.join("workspace")).unwrap();
         // no ssh server: the command fails fast, which is all this test needs
-        let cfg = Config { hosts: vec![Host { target: "nobody@127.0.0.1".into(), port: Some(1), connect_timeout_secs: 2, ..host() }], ..Default::default() };
+        let cfg = Config {
+            hosts: vec![Host { target: "nobody@127.0.0.1".into(), port: Some(1), connect_timeout_secs: 2, ..host() }],
+            ..Default::default()
+        };
         let asked = std::cell::RefCell::new(Vec::new());
         let no = |c: &str| {
             asked.borrow_mut().push(c.to_string());
