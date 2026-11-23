@@ -121,6 +121,19 @@ impl Agent {
         Ok(Self { home, cfg, llm, bg, session, system, history: Vec::new(), summary: String::new(), pins: Vec::new(), interactive, set: Set::Full, taint: String::new(), last_skills: Vec::new(), feedback: Vec::new(), turns_since_review: 0, tools_since_review: 0, inbox: Inbox::default(), trim_upto: Default::default(), detached: false })
     }
 
+    /// Continue an earlier conversation (the daemon's chats after a restart): its
+    /// recent messages come back from the transcript, and new ones go to the same file.
+    pub fn resume(home: PathBuf, cfg: Config, kind: &str, session_id: &str) -> Result<Self, String> {
+        let mut a = Self::new(home, cfg, false, kind)?;
+        let Some(s) = Session::open(&a.home, session_id, RESUME_MAX_AGE_SECS) else { return Ok(a) };
+        let msgs = complete_tool_rounds(s.messages());
+        let max = a.cfg.agent.max_history.max(4);
+        let start = start_for(&msgs, max, a.cfg.agent.context_chars);
+        a.history = msgs[start..].to_vec();
+        a.session = s;
+        Ok(a)
+    }
+
     fn push(&mut self, m: Msg) {
         self.session.append(&m);
         self.history.push(m);
@@ -349,7 +362,10 @@ impl Agent {
             _ => format!("{input}\n[{n} images attached]"),
         };
         self.push(Msg::user_with_images(&text, images));
-        let defs = tools::definitions(&self.cfg, self.set);
+        #[cfg_attr(not(feature = "code"), allow(unused_mut))]
+        let mut defs = tools::definitions(&self.cfg, self.set);
+        #[cfg(feature = "code")]
+        let mut project = crate::code::root();
         let started = std::time::Instant::now();
         #[cfg_attr(not(feature = "code"), allow(unused_mut))]
         let (mut secs, mut rounds) = (self.cfg.agent.turn_budget_secs.max(30), self.cfg.agent.max_iterations.max(1));
@@ -533,6 +549,13 @@ impl Agent {
             }
             if !self.detached {
                 self.taint = crate::util::origin().1;
+            }
+            // a project opened or closed from the chat: its rules and coding tools apply from the next round
+            #[cfg(feature = "code")]
+            if crate::code::root() != project {
+                project = crate::code::root();
+                self.refresh_system();
+                defs = tools::definitions(&self.cfg, self.set);
             }
             // images opened with view_image: show them to the model in the next message
             let viewed = tools::take_viewed();
@@ -1149,6 +1172,28 @@ fn claims_sending(text: &str) -> bool {
     .any(|p| t.contains(p))
 }
 
+/// How old a conversation may be and still continue after a restart.
+pub const RESUME_MAX_AGE_SECS: u64 = 7 * 86400;
+
+/// A transcript cut off mid-step (pagurus stopped while a tool ran) ends with tool
+/// calls that never got answers; providers reject that, so drop the unfinished round.
+fn complete_tool_rounds(mut msgs: Vec<Msg>) -> Vec<Msg> {
+    let mut i = 0;
+    while i < msgs.len() {
+        let Some(calls) = msgs[i].tool_calls.clone().filter(|c| !c.is_empty()) else {
+            i += 1;
+            continue;
+        };
+        let answered = calls.iter().all(|c| msgs[i + 1..].iter().take_while(|m| m.role == "tool").any(|m| m.tool_call_id.as_deref() == Some(c.id.as_str())));
+        if !answered {
+            msgs.truncate(i);
+            break;
+        }
+        i += 1;
+    }
+    msgs
+}
+
 /// First message to keep so that at most `max_msgs` messages and about
 /// `max_chars` characters remain. Always starts on a user message (never
 /// splits a tool exchange) and never drops the latest user message.
@@ -1752,6 +1797,30 @@ pub(crate) mod tests {
         a.forget_old_images();
         assert!(a.history[0].images.is_empty() && a.history[0].content.as_deref().unwrap().contains("no longer attached"));
         assert_eq!(a.history[2].images.len(), 1, "the last exchange keeps its image");
+    }
+
+    #[test]
+    fn a_chat_continues_after_a_restart_without_its_unfinished_step() {
+        let home = std::env::temp_dir().join(format!("pagurus-resume-{}", crate::util::new_id()));
+        let mut cfg = crate::config::Config::default();
+        cfg.provider.model = "test".into();
+        let mut a = super::Agent::new(home.clone(), cfg.clone(), false, "tg").unwrap();
+        a.push(Msg::user("is the kiosk up?"));
+        a.push(Msg::assistant("yes, olibith-kiosk is running"));
+        a.push(Msg::user("restart world-dashboard"));
+        let call = crate::llm::ToolCall { id: "c9".into(), kind: "function".into(), function: crate::llm::FnCall { name: "shell".into(), arguments: "{}".into() }, extra: Default::default() };
+        a.push(Msg { role: "assistant".into(), tool_calls: Some(vec![call]), ..Default::default() }); // pagurus stopped here
+        let id = a.session.id.clone();
+        drop(a);
+        let mut b = super::Agent::resume(home.clone(), cfg.clone(), "tg", &id).unwrap();
+        assert_eq!(b.session.id, id, "same transcript");
+        let texts: Vec<String> = b.history.iter().map(|m| m.content.clone().unwrap_or_default()).collect();
+        assert_eq!(texts, ["is the kiosk up?", "yes, olibith-kiosk is running", "restart world-dashboard"], "the unanswered tool call is dropped");
+        b.push(Msg::assistant("done"));
+        assert_eq!(b.session.messages().len(), 5, "new messages go to the same file");
+        let fresh = super::Agent::resume(home.clone(), cfg, "tg", "no-such-session").unwrap();
+        assert!(fresh.history.is_empty() && fresh.session.id != id);
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     #[test]

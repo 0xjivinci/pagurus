@@ -59,6 +59,21 @@ pub fn root() -> Option<PathBuf> {
 const RULE_FILES: &[&str] = &["AGENTS.md", "CLAUDE.md", ".cursorrules", ".github/copilot-instructions.md", "CONTRIBUTING.md"];
 const RULES_MAX: usize = 6000;
 
+/// Files that mark a folder as a project (plain `pagurus` started there opens it).
+const MARKERS: &[&str] = &[
+    ".git", "AGENTS.md", "CLAUDE.md", "Cargo.toml", "package.json", "pyproject.toml", "requirements.txt", "setup.py",
+    "go.mod", "Makefile", "CMakeLists.txt", "pom.xml", "build.gradle", "Gemfile", "composer.json", "deno.json",
+];
+
+/// `pagurus` started inside a project folder: open it. None anywhere else.
+pub fn auto_open(home: &Path) -> Option<String> {
+    let cwd = std::env::current_dir().ok()?;
+    if !MARKERS.iter().any(|m| cwd.join(m).exists()) {
+        return None;
+    }
+    open(home, &cwd.to_string_lossy()).ok().map(|m| format!("{m}\n(opened because this folder is a project; /project off leaves it)"))
+}
+
 /// Open a project folder. Refuses `/`, your home folder itself and pagurus's home.
 pub fn open(home: &Path, arg: &str) -> Result<String, String> {
     let p = crate::util::expand(arg.trim());
@@ -68,7 +83,9 @@ pub fn open(home: &Path, arg: &str) -> Result<String, String> {
     }
     let user_home = std::env::var_os("HOME").map(PathBuf::from).and_then(|h| h.canonicalize().ok());
     if root.parent().is_none() || user_home.as_deref() == Some(root.as_path()) {
-        return Err("pick a project folder, not / or your whole home folder".into());
+        return Err("pick a project folder, not / or your whole home folder: `cd` into a project first, or \
+                    `pagurus code ~/path/to/project`; for a new one, `mkdir ~/my-tool && pagurus code ~/my-tool`"
+            .into());
     }
     if home.canonicalize().is_ok_and(|h| h.starts_with(&root) || root.starts_with(&h)) {
         return Err("that's pagurus's own home; pick a project folder".into());
@@ -213,12 +230,21 @@ pub fn revert(home: &Path) -> Result<String, String> {
 
 // ---------- tools ----------
 
+/// The `project` tool: open or close a project folder from a chat (opening asks the user).
+pub fn project_definition() -> Value {
+    json!({ "type": "function", "function": { "name": "project",
+        "description": "Work inside a project folder: open gives you its rules and grep/glob/check/git and lets you edit files there (asks the user); close ends it.",
+        "parameters": { "type": "object", "properties": {
+            "action": { "type": "string", "enum": ["open", "close"] }, "path": { "type": "string" } }, "required": ["action"] } } })
+}
+
 pub fn definitions() -> Vec<Value> {
     if current().is_none() {
-        return Vec::new();
+        return vec![project_definition()];
     }
     let f = |name: &str, desc: &str, params: Value| json!({ "type": "function", "function": { "name": name, "description": desc, "parameters": params } });
     vec![
+        project_definition(),
         f("grep", "Search the project's files for a regular expression (ripgrep, else grep). Returns path:line:text.",
           json!({ "type": "object", "properties": {
               "pattern": { "type": "string" }, "path": { "type": "string", "description": "file or folder, default the whole project" },
@@ -238,10 +264,29 @@ pub fn definitions() -> Vec<Value> {
 
 /// The coding tools; None for any other tool name.
 pub fn run(ctx: &Ctx, name: &str, a: &Value) -> Option<Result<String, String>> {
+    if name == "project" {
+        return Some(match a["action"].as_str().unwrap_or("") {
+            "close" => Ok(close()),
+            "open" => {
+                let path = a["path"].as_str().unwrap_or("").trim();
+                if path.is_empty() {
+                    return Some(Err("give the folder: path".into()));
+                }
+                let full = crate::util::expand(path).canonicalize().map_err(|e| format!("{path}: {e}"));
+                match full {
+                    Ok(f) if root().as_deref() == Some(f.as_path()) => Ok(format!("{} is already open", f.display())),
+                    Ok(f) => crate::tools::approve(ctx, "in a project pagurus edits files and runs its checks", &format!("open project {}", f.display()))
+                        .and_then(|_| open(ctx.home, &f.to_string_lossy())),
+                    Err(e) => Err(e),
+                }
+            }
+            other => Err(format!("project action `{other}`: use open or close")),
+        });
+    }
     if !matches!(name, "grep" | "glob" | "check" | "git") {
         return None;
     }
-    let Some(p) = current() else { return Some(Err(format!("{name} works in project mode: the user opens one with /project <folder>"))) };
+    let Some(p) = current() else { return Some(Err(format!("{name} works in a project: open one with the project tool (the user approves)"))) };
     Some(match name {
         "grep" => grep(ctx, &p.root, a),
         "glob" => glob(&p.root, a["pattern"].as_str().unwrap_or("")),
@@ -540,6 +585,32 @@ pub fn diff(old: &str, new: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_chat_opens_a_project_only_with_the_users_ok() {
+        let home = std::env::temp_dir().join(format!("pagurus-projtool-{}", crate::util::new_id()));
+        let proj = std::env::temp_dir().join(format!("pagurus-projtool-p-{}", crate::util::new_id()));
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&proj).unwrap();
+        let cfg = crate::config::Config::default();
+        let (no, yes) = (|_: &str| false, |_: &str| true);
+        let open_it = json!({"action":"open","path": proj.display().to_string()});
+        let ctx = Ctx { home: &home, cfg: &cfg, session: "t", interactive: false, approver: Some(&no) };
+        assert!(run(&ctx, "project", &open_it).unwrap().is_err(), "refused");
+        assert!(root().is_none());
+        let ctx = Ctx { home: &home, cfg: &cfg, session: "t", interactive: false, approver: None };
+        assert!(run(&ctx, "project", &open_it).unwrap().unwrap_err().contains("unattended"), "nobody to ask");
+        let ctx = Ctx { home: &home, cfg: &cfg, session: "t", interactive: false, approver: Some(&yes) };
+        assert!(run(&ctx, "project", &open_it).unwrap().is_ok());
+        assert_eq!(root(), proj.canonicalize().ok());
+        assert!(run(&ctx, "project", &open_it).unwrap().unwrap().contains("already open"));
+        let home_dir = std::env::var("HOME").unwrap();
+        assert!(run(&ctx, "project", &json!({"action":"open","path": home_dir})).unwrap().unwrap_err().contains("not / or your whole home"));
+        run(&ctx, "project", &json!({"action":"close"})).unwrap().unwrap();
+        assert!(root().is_none());
+        let _ = std::fs::remove_dir_all(&home);
+        let _ = std::fs::remove_dir_all(&proj);
+    }
 
     #[test]
     fn globs_match_like_shells_do() {

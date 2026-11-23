@@ -25,6 +25,18 @@ pub fn check_in(home: &Path, cwd: &Path, deny: &[String], cmd: &str) -> Option<S
     if compact.contains("(){") && compact.contains("&};") {
         return Some("it looks like a fork bomb".into());
     }
+    // pagurus's own keys: its env file and any process's environment (pagurus's holds the keys)
+    let low = cmd.to_lowercase();
+    if low.contains("/proc/") && low.contains("environ") {
+        return Some("it reads a process's environment, where pagurus's API keys live".into());
+    }
+    for seg in &segs {
+        for w in &seg.words {
+            if f.path(w).is_some_and(|p| p == f.home.join("env") || f.home.canonicalize().is_ok_and(|h| p == h.join("env"))) {
+                return Some("it touches pagurus's own keys (the env file)".into());
+            }
+        }
+    }
     for (i, seg) in segs.iter().enumerate() {
         for start in starts(&seg.words) {
             let w = &seg.words[start..];
@@ -427,6 +439,13 @@ mod tests {
         }
         assert!(blocked(&format!("rm -rf {}", h.display())));
         assert!(blocked("rm -rf ../learn"), "relative to the workspace");
+        // reading pagurus's keys: no approval or yolo lets these through
+        let env = h.join("env").display().to_string();
+        for read in [format!("cat {env}"), format!("grep KEY {env}"), format!("head -1 {env} | base64"), "cat ../env".into(),
+            "cat /proc/1234/environ".into(), "tr '\\0' '\\n' < /proc/self/environ".into(), "xxd /proc/$(pgrep pagurus)/environ".into()] {
+            assert!(blocked(&read), "{read} should be blocked");
+        }
+        assert!(!blocked(&format!("cat {}", h.join("config.toml").display())), "the config holds no keys: reading it is fine");
     }
 
     #[test]

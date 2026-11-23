@@ -24,7 +24,15 @@
 
 ## Coding (full build)
 
-`pagurus code` in a project folder (or `/project ~/code/app` in a chat) points pagurus at one code base:
+pagurus works on one code base at a time, a **project folder**. Three ways in:
+
+- Start plain `pagurus` inside a project (a folder with `.git`, `Cargo.toml`, `package.json`, `pyproject.toml`,
+  `go.mod`, a `Makefile`, `AGENTS.md` …) and it opens it. `/project off` leaves it.
+- `pagurus code ~/code/app`, or `/project ~/code/app` in a terminal chat.
+- From any chat, Telegram included: "work on ~/code/app" — the `project` tool opens it **after you approve**. Never
+  `/`, your home folder itself or pagurus's own folder.
+
+In a project:
 
 - File tools may write there, and relative paths and the shell start there. `read_file` shows line numbers.
 - **Four more tools:** `grep` (ripgrep, else grep), `glob` (`src/**/*.rs`), `check` (the project's tests, build or

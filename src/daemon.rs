@@ -868,7 +868,7 @@ impl Daemon {
             "/pin" | "/pins" | "/unpin" => {
                 let all = format!("{arg} {rest}").trim().to_string();
                 match self.chats.get_mut(&chat) {
-                    None if cmd == "/pin" && !all.is_empty() => match Agent::new(home.clone(), cfg.clone(), false, &channel::kind(chat)) {
+                    None if cmd == "/pin" && !all.is_empty() => match chat_agent(&home, cfg, chat) {
                         Ok(mut a) => {
                             let r = a.pin(&all);
                             self.chats.insert(chat, Chat { agent: Some(Box::new(a)), last: now(), queue: VecDeque::new(), typing: false, inbox: Default::default() });
@@ -889,6 +889,7 @@ impl Daemon {
                 if busy {
                     return Some("I'm still working on your last message — /stop first.".into());
                 }
+                forget_chat(&home, chat);
                 if let Some(c) = self.chats.remove(&chat) {
                     if let Some(agent) = c.agent.filter(|a| a.has_unreviewed()) {
                         self.submit(Job::Review { chat, agent, keep: false });
@@ -973,7 +974,7 @@ impl Daemon {
             }
             _ => {
                 if let std::collections::hash_map::Entry::Vacant(v) = self.chats.entry(chat) {
-                    match Agent::new(home.clone(), cfg.clone(), false, &channel::kind(chat)) {
+                    match chat_agent(&home, cfg, chat) {
                         Ok(a) => {
                             v.insert(Chat { agent: Some(Box::new(a)), last: now(), queue: VecDeque::new(), typing: false, inbox: Default::default() });
                         }
@@ -1272,6 +1273,43 @@ pub fn run(home: PathBuf, cfg: Config) -> Result<(), String> {
 const CATCH_UP_SECS: u64 = 12 * 3600;
 
 /// What the daemon remembers across restarts (`state/daemon.json`).
+/// Which transcript each chat is in (state/chats.json), so a restart (an update,
+/// a reboot) continues the conversation instead of starting over. /new forgets it.
+fn chats_file(home: &Path) -> PathBuf {
+    home.join("state").join("chats.json")
+}
+
+fn chat_sessions(home: &Path) -> serde_json::Map<String, serde_json::Value> {
+    serde_json::from_str(&read(&chats_file(home))).unwrap_or_default()
+}
+
+fn save_chat_sessions(home: &Path, m: &serde_json::Map<String, serde_json::Value>) {
+    let p = chats_file(home);
+    let _ = std::fs::create_dir_all(p.parent().unwrap_or(home));
+    if let Err(e) = crate::util::write_atomic(&p, &serde_json::Value::Object(m.clone()).to_string()) {
+        eprintln!("pagurus: couldn't save chat sessions: {e}");
+    }
+}
+
+/// The agent for a chat: its earlier conversation if there is a recent one, else a new one.
+fn chat_agent(home: &Path, cfg: &Config, chat: i64) -> Result<Agent, String> {
+    let mut m = chat_sessions(home);
+    let prev = m.get(&chat.to_string()).and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let a = Agent::resume(home.to_path_buf(), cfg.clone(), &channel::kind(chat), &prev)?;
+    if a.session.id != prev {
+        m.insert(chat.to_string(), json!(a.session.id));
+        save_chat_sessions(home, &m);
+    }
+    Ok(a)
+}
+
+fn forget_chat(home: &Path, chat: i64) {
+    let mut m = chat_sessions(home);
+    if m.remove(&chat.to_string()).is_some() {
+        save_chat_sessions(home, &m);
+    }
+}
+
 struct State {
     last_tidy: u64,
     last_curate: u64,

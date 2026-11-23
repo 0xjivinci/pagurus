@@ -93,10 +93,29 @@ fn main() {
     }
 }
 
+#[cfg(unix)]
+fn quiet_on_closed_pipe() {
+    extern "C" {
+        fn signal(sig: i32, handler: usize) -> usize;
+    }
+    // SAFETY: restores the default action for SIGPIPE (13 on Linux and macOS), as a C program has
+    unsafe {
+        signal(13, 0);
+    }
+}
+
+#[cfg(not(unix))]
+fn quiet_on_closed_pipe() {}
+
 fn run(args: &[String]) -> Result<(), String> {
     let home = util::home_dir();
     util::load_env(&home);
     let cmd = args.first().map(String::as_str).unwrap_or("chat");
+    // `pagurus doctor | head`: short commands stop quietly when the reader goes away,
+    // like other Unix tools, instead of panicking (long-running ones keep Rust's default)
+    if matches!(cmd, "doctor" | "audit" | "skills" | "learn" | "art" | "version" | "-V" | "--version" | "help" | "--help" | "-h" | "board" | "model") {
+        quiet_on_closed_pipe();
+    }
     // skills that came with this version: installed once, on a home that already exists
     if matches!(cmd, "chat" | "daemon" | "run" | "code") && home.join("config.toml").exists() {
         let new = bundled::install_new(&home);
@@ -119,7 +138,13 @@ fn run(args: &[String]) -> Result<(), String> {
             Ok(())
         }
         "import" => import::run(&home, &config::load(&home)?, &args[1..]),
-        "chat" => agent::repl(home.clone(), config::load(&home)?),
+        "chat" => {
+            #[cfg(feature = "code")]
+            if let Some(m) = code::auto_open(&home) {
+                println!("{m}");
+            }
+            agent::repl(home.clone(), config::load(&home)?)
+        }
         #[cfg(feature = "code")]
         "code" => {
             let dir = args.get(1).cloned().unwrap_or_else(|| ".".into());

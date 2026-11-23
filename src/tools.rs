@@ -2175,7 +2175,7 @@ mod tests {
 mod defsize {
     /// Every tool description is sent with every model call: keep the total in check
     /// (it was 10.6k chars with every built-in tool on; raise this only on purpose:
-    /// 12k since the task board and parallel delegation; uge: +400 for the skills hub, +700 for the browser).
+    /// 12k since the task board and parallel delegation; uge: +400 for the skills hub, +700 for the browser, +300 for opening projects from a chat).
     #[test]
     fn tool_definitions_stay_small() {
         let mut cfg = crate::config::Config::default();
@@ -2183,7 +2183,7 @@ mod defsize {
         cfg.tools.shell = "ask".into();
         let total: usize = super::definitions(&cfg, super::Set::Full).as_array().unwrap().iter().map(|d| d.to_string().len()).sum();
         // the uge build adds its own tools (art for Tezos and Ethereum with discovery: ~1.3k) on top of the small build's budget
-        let budget = if cfg!(feature = "art") { 15_300 } else { 12_000 };
+        let budget = if cfg!(feature = "art") { 15_600 } else { 12_000 };
         assert!(total <= budget, "tool definitions grew to {total} chars");
     }
 }

@@ -31,7 +31,7 @@ model, tokens, time, how full the context is and any yolo time left.
 | `/rollback` · `/rollback <n>` | list file checkpoints · put back a file pagurus wrote or edited |
 | `/procs` · `/procs kill <n>` | background processes it started |
 | `/pin <fact>` · `/pins` · `/unpin <n>` | keep something in view for this conversation |
-| `/new` | start a fresh conversation |
+| `/new` | start a fresh conversation (otherwise a Telegram, Discord, Slack or email chat carries on, even after pagurus restarts or updates, for up to 7 days) |
 | `/learn` · `/undo <id>` · `/lock <memory\|user\|skill>` | see and govern what it learned |
 | `/tasks` · `/skills` · `/curate` · `/tidy` | standing tasks · skills · tidy the skill library · tidy memory |
 | `/health` | busy or idle, models cooling down, unsent messages, memory use |

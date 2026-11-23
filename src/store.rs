@@ -27,6 +27,28 @@ impl Session {
         Self { id, path }
     }
 
+    /// An earlier session to continue (the daemon after a restart): None if its
+    /// transcript is gone or older than `max_age_secs`.
+    pub fn open(home: &Path, id: &str, max_age_secs: u64) -> Option<Self> {
+        if id.is_empty() || id.contains(['/', '\\']) || id.contains("..") {
+            return None;
+        }
+        let path = home.join("sessions").join(format!("{id}.jsonl"));
+        let age = std::fs::metadata(&path).ok()?.modified().ok()?.elapsed().ok()?.as_secs();
+        (age <= max_age_secs).then(|| Self { id: id.to_string(), path: Some(path) })
+    }
+
+    /// The messages recorded so far (notes for the transcript reader left out).
+    pub fn messages(&self) -> Vec<Msg> {
+        let Some(path) = &self.path else { return Vec::new() };
+        crate::util::read(path)
+            .lines()
+            .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+            .filter_map(|v| serde_json::from_value::<Msg>(v["m"].clone()).ok())
+            .filter(|m| m.role != "system")
+            .collect()
+    }
+
     pub fn append(&self, m: &Msg) {
         let Some(path) = &self.path else { return };
         let line = json!({ "t": now(), "m": m }).to_string();
