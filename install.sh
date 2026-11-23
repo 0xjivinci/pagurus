@@ -59,7 +59,15 @@ else base="https://github.com/${REPO}/releases/latest/download"; fi
 
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 say "downloading ${asset} ${VERSION:-(latest)} from ${REPO}..."
-fetch "$base/$asset" "$tmp/$asset" || die "download failed: $base/$asset"
+if ! fetch "$base/$asset" "$tmp/$asset"; then
+  case "$asset" in
+    pagurus-uge-*) # releases before v0.1.1 called it "full"
+      asset=$(printf '%s' "$asset" | sed 's/^pagurus-uge-/pagurus-full-/')
+      say "no uge file in this release; trying ${asset}..."
+      fetch "$base/$asset" "$tmp/$asset" || die "download failed: $base/$asset" ;;
+    *) die "download failed: $base/$asset" ;;
+  esac
+fi
 fetch "$base/SHA256SUMS" "$tmp/SHA256SUMS" || die "couldn't download the checksums"
 
 want=$(grep " \*\{0,1\}$asset\$" "$tmp/SHA256SUMS" | head -n 1 | cut -d' ' -f1)
