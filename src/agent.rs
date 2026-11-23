@@ -151,6 +151,18 @@ impl Agent {
             .collect()
     }
 
+    /// Images from before the last exchange are never sent again (see `trimmed`):
+    /// let them go, so a long chat with photos or art previews doesn't keep megabytes.
+    fn forget_old_images(&mut self) {
+        let Some(last_user) = self.history.iter().rposition(|m| m.role == "user") else { return };
+        for m in &mut self.history[..last_user] {
+            if !m.images.is_empty() {
+                m.images = Vec::new();
+                m.content = Some(format!("{} [image no longer attached]", m.content.as_deref().unwrap_or("")));
+            }
+        }
+    }
+
     fn window(&self) -> Vec<Msg> {
         let mut msgs = self.trimmed();
         if self.trim_turn(&msgs) {
@@ -329,6 +341,7 @@ impl Agent {
         if !self.detached {
             crate::util::set_origin(self.origin_label(), &self.taint);
         }
+        self.forget_old_images();
         let n = images.len();
         let text = match n {
             0 => input.to_string(),
@@ -1727,6 +1740,18 @@ pub(crate) mod tests {
         assert!(!super::claims_sending("Want me to send you the image?"));
         assert!(!super::claims_sending("I can send it if you like."));
         assert!(!super::claims_sending("The piece sold for 9 tez."));
+    }
+
+    #[test]
+    fn old_images_are_let_go_but_the_latest_stays() {
+        let mut a = agent();
+        a.history.push(Msg::user_with_images("look at this", vec!["data:image/png;base64,AAAA".into()]));
+        a.history.push(Msg::assistant("a crab"));
+        a.history.push(Msg::user_with_images("and this", vec!["data:image/png;base64,BBBB".into()]));
+        a.history.push(Msg::assistant("a shell"));
+        a.forget_old_images();
+        assert!(a.history[0].images.is_empty() && a.history[0].content.as_deref().unwrap().contains("no longer attached"));
+        assert_eq!(a.history[2].images.len(), 1, "the last exchange keeps its image");
     }
 
     #[test]

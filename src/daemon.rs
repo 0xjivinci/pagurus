@@ -472,6 +472,8 @@ fn worker(home: PathBuf, mut cfg: Config, jobs: Receiver<Job>, events: Sender<Ev
         if events.send(ev).is_err() {
             break;
         }
+        // a turn's temporary memory (pages, images, search results) goes back to the system
+        crate::util::release_memory();
     }
 }
 

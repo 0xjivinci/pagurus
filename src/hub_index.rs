@@ -182,8 +182,10 @@ pub fn refresh(home: &Path, cfg: &Config) -> Result<usize, String> {
 }
 
 /// The local copy, downloaded or refreshed when missing or over a week old
-/// (an old copy is used when the download fails).
-fn entries(home: &Path, cfg: &Config) -> Result<Vec<Entry>, String> {
+/// (an old copy is used when the download fails). Read one line at a time, so a
+/// search never holds the ~20k entries in memory (a Pi daemon keeps what it grows to).
+fn each_entry(home: &Path, cfg: &Config, mut f: impl FnMut(Entry)) -> Result<(), String> {
+    use std::io::BufRead;
     let path = index_file(home);
     let age = std::fs::metadata(&path).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).map(|d| d.as_secs());
     if age.is_none_or(|a| a > INDEX_MAX_AGE_SECS) {
@@ -193,40 +195,80 @@ fn entries(home: &Path, cfg: &Config) -> Result<Vec<Entry>, String> {
             }
         }
     }
-    Ok(crate::util::read(&path).lines().filter_map(Entry::parse).collect())
+    let file = std::fs::File::open(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    for line in std::io::BufReader::new(file).lines().map_while(Result::ok) {
+        if let Some(e) = Entry::parse(&line) {
+            f(e);
+        }
+    }
+    Ok(())
 }
 
 /// Best matches for `query`, most relevant first: every word must appear in the
 /// name, tags or description; name hits count most, reviewed sources rank higher.
 pub fn search(home: &Path, cfg: &Config, query: &str, n: usize) -> Result<Vec<Entry>, String> {
-    Ok(rank(entries(home, cfg)?, query, n))
+    let mut r = Ranker::new(query, n);
+    each_entry(home, cfg, |e| r.add(e))?;
+    Ok(r.done())
 }
 
-fn rank(all: Vec<Entry>, query: &str, n: usize) -> Vec<Entry> {
-    let words: Vec<String> = query.to_lowercase().split(|c: char| !c.is_alphanumeric()).filter(|w| w.len() >= 2).map(String::from).collect();
-    if words.is_empty() {
-        return Vec::new();
+/// Keeps only the best few matches while entries stream past.
+struct Ranker {
+    words: Vec<String>,
+    n: usize,
+    best: Vec<(i64, Entry)>,
+}
+
+impl Ranker {
+    fn new(query: &str, n: usize) -> Ranker {
+        let words = query.to_lowercase().split(|c: char| !c.is_alphanumeric()).filter(|w| w.len() >= 2).map(String::from).collect();
+        Ranker { words, n, best: Vec::new() }
     }
-    let mut scored: Vec<(i64, Entry)> = all
-        .into_iter()
-        .filter_map(|e| {
-            let (name, tags, desc) = (e.name.to_lowercase(), e.tags.to_lowercase(), e.desc.to_lowercase());
-            let mut score = 0i64;
-            for w in &words {
-                let s = if name.contains(w.as_str()) { 6 } else if tags.contains(w.as_str()) { 3 } else if desc.contains(w.as_str()) { 1 } else { return None };
-                score += s;
-            }
-            score += match e.trust.as_str() {
-                "builtin" => 4,
-                "trusted" => 2,
-                _ => 0,
-            };
-            Some((score, e))
+
+    /// Every word must appear; name hits count most, reviewed sources rank higher.
+    fn score(&self, e: &Entry) -> Option<i64> {
+        if self.words.is_empty() {
+            return None;
+        }
+        let (name, tags, desc) = (e.name.to_lowercase(), e.tags.to_lowercase(), e.desc.to_lowercase());
+        let mut score = 0;
+        for w in &self.words {
+            score += if name.contains(w.as_str()) { 6 } else if tags.contains(w.as_str()) { 3 } else if desc.contains(w.as_str()) { 1 } else { return None };
+        }
+        Some(score + match e.trust.as_str() {
+            "builtin" => 4,
+            "trusted" => 2,
+            _ => 0,
         })
-        .collect();
-    scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.name.len().cmp(&b.1.name.len())));
-    let mut seen = std::collections::HashSet::new();
-    scored.into_iter().map(|(_, e)| e).filter(|e| seen.insert(e.id())).take(n).collect()
+    }
+
+    fn add(&mut self, e: Entry) {
+        if let Some(s) = self.score(&e) {
+            self.best.push((s, e));
+            // room for duplicates (the same skill listed twice) before trimming
+            if self.best.len() > self.n * 4 + 16 {
+                self.sort();
+                self.best.truncate(self.n * 2 + 8);
+            }
+        }
+    }
+
+    fn sort(&mut self) {
+        self.best.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.name.len().cmp(&b.1.name.len())));
+    }
+
+    fn done(mut self) -> Vec<Entry> {
+        self.sort();
+        let mut seen = std::collections::HashSet::new();
+        self.best.into_iter().map(|(_, e)| e).filter(|e| seen.insert(e.id())).take(self.n).collect()
+    }
+}
+
+#[cfg(test)]
+fn rank(all: Vec<Entry>, query: &str, n: usize) -> Vec<Entry> {
+    let mut r = Ranker::new(query, n);
+    all.into_iter().for_each(|e| r.add(e));
+    r.done()
 }
 
 /// Search results as text (CLI and the agent's skill_hub tool).
@@ -249,11 +291,19 @@ pub(crate) fn resolve(home: &Path, cfg: &Config, src: &str) -> Result<Option<(St
     if s.starts_with("https://") || s.starts_with("http://") || crate::util::expand(s).exists() || s.starts_with('/') || s.starts_with('.') || s.starts_with('~') {
         return Ok(None);
     }
-    let all = entries(home, cfg).map_err(|e| format!("`{s}` is not a URL or a path, and the skills hub can't be searched: {e}"))?;
-    if let Some(e) = all.iter().find(|e| e.id() == s) {
+    // only the entries that match are kept
+    let (mut exact, mut same) = (None, Vec::new());
+    each_entry(home, cfg, |e| {
+        if exact.is_none() && e.id() == s {
+            exact = Some(e);
+        } else if e.name.eq_ignore_ascii_case(s) {
+            same.push(e);
+        }
+    })
+    .map_err(|e| format!("`{s}` is not a URL or a path, and the skills hub can't be searched: {e}"))?;
+    if let Some(e) = exact {
         return Ok(Some((e.url(), e.trust.clone())));
     }
-    let mut same: Vec<&Entry> = all.iter().filter(|e| e.name.eq_ignore_ascii_case(s)).collect();
     same.sort_by_key(|e| match e.trust.as_str() {
         "builtin" => 0,
         "trusted" => 1,

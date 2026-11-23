@@ -231,6 +231,21 @@ pub fn one_line(s: &str, max: usize) -> String {
     clip(&s.split_whitespace().collect::<Vec<_>>().join(" "), max)
 }
 
+/// Give freed memory back to the system. glibc keeps what a process once used
+/// (a long-running daemon would stay at its peak); musl and macOS return it on their own.
+pub fn release_memory() {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    {
+        extern "C" {
+            fn malloc_trim(pad: usize) -> i32;
+        }
+        // SAFETY: malloc_trim only returns free heap pages to the kernel; it touches no live allocation
+        unsafe {
+            malloc_trim(0);
+        }
+    }
+}
+
 /// Decode standard base64 (padding optional); None on a bad character.
 #[cfg(feature = "browser")]
 pub fn unbase64(s: &str) -> Option<Vec<u8>> {
