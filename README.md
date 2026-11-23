@@ -138,7 +138,7 @@ and can be undone. Set `mode = "propose"` to approve each change yourself, or `o
   in `~/.pagurus/env` (mode 600), and everything sent out is redacted.
 - **It writes only in its own workspace,** and saves a checkpoint before every edit (`/rollback`).
 - **Small by default.** smol leaves out coding mode and the browser to stay tiny; they are in uge. pagurus never drives your desktop. Add what else you need through MCP.
-- **Maturity.** 0.1.0 is the latest release; `main` is 0.1.1 in development, with about 190 tests. Discord, Slack,
+- **Maturity.** Version 0.1.1, with about 190 tests. Discord, Slack,
   email, the task board, the swarm, ssh, the sandbox and the browser have seen the least real use so far. The Windows
   build has not been tried on a real Windows PC.
 
