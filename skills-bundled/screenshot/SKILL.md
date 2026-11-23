@@ -1,17 +1,20 @@
 ---
 name: screenshot
-description: Take a screenshot of a local web page/dashboard or of the Pi's screen and send it to the user
+description: Take a screenshot of the machine's screen or of a local web page/dashboard and send it to the user
 ---
 
-Use when the user wants to *see* the screen, a kiosk or a dashboard.
+Use when the user wants to *see* the screen, a web page or a dashboard.
 
-**A. The physical screen (Wayland desktops such as labwc)**
-1. Needs approval: `XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 grim /tmp/shot.png`
-   (1000 is the usual user id; `id -u` shows it.) Fast and exact, but black when the screen is off.
+**A. The physical screen**
+1. Needs approval. Fast and exact, but black when the screen is off.
+   - Linux, Wayland (labwc, sway, wayfire…): `XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 grim /tmp/shot.png`
+     (1000 is the usual user id; `id -u` shows it.)
+   - Linux, X11: `DISPLAY=:0 import -window root /tmp/shot.png` (ImageMagick) or `scrot /tmp/shot.png`
+   - macOS: `screencapture -x /tmp/shot.png` (the terminal needs Screen Recording permission)
 
 **B. A web page rendered headless (when the screen is off)**
-1. Find the URL: the kiosk's command line (`ps -eo args | grep -- --kiosk`) or the service file.
-2. Needs approval; 20–60 s on a Pi 3B:
+1. Find the URL: ask, or look in the page's service file or the browser's command line (`ps -eo args | grep -i chrom`).
+2. Needs approval; a few seconds on a laptop, 20–60 s on a Raspberry Pi:
    `chromium --headless=new --disable-gpu --hide-scrollbars --window-size=1280,800 --virtual-time-budget=5000 --user-data-dir=/tmp/shot-profile --screenshot=/tmp/shot.png URL`
    Pages that fade in content with JavaScript or draw with WebGL often come out black this way.
 

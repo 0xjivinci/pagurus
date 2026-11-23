@@ -107,6 +107,8 @@ and can be undone. Set `mode = "propose"` to approve each change yourself, or `o
 | **Reaches further** | Web search (no account needed), MCP servers, your other machines over ssh, and a throwaway Docker sandbox, all under the same rules. |
 | **Big jobs** | Parallel sub-agents, a task board that keeps working in the background, and pagurus agents on your other devices that hand each other tasks. |
 | **Sees** | Send it a photo, or let it look at a screenshot. Needs a model that can see images. |
+| **Remembers the chat** | A Telegram, Discord, Slack or email conversation carries on after pagurus restarts or updates, for up to 7 days (`/new` starts fresh). |
+| **uge build** | For laptops and servers, about 4 MB: a richer terminal chat, [coding mode](docs/tools.md#coding-uge-build) (edit, search, test and commit in a project, from Telegram too), a [headless browser](docs/tools.md#browser-uge-build) for JavaScript pages, forms, screenshots and PDFs, the skills hub, and [Tezos art research](docs/art.md) with PDF reports. |
 
 ## Good to know
 
@@ -117,16 +119,17 @@ and can be undone. Set `mode = "propose"` to approve each change yourself, or `o
 - **Secrets stay out.** Files that look like secrets (`~/.ssh`, keys, tokens, `.env`) are never read. API keys live
   in `~/.pagurus/env` (mode 600), and everything sent out is redacted.
 - **It writes only in its own workspace,** and saves a checkpoint before every edit (`/rollback`).
-- **What it is not.** Not a coding agent, and it doesn't drive a browser or your desktop. These are left out to keep
-  it small. Add what you need through MCP.
-- **Maturity.** Version 0.1.0, the first release, with 141 tests. Discord, Slack, email, the task board, the swarm,
-  ssh and the sandbox have seen the least real use so far. The Windows build has not been tried on a real Windows PC.
+- **Small by default.** The small build leaves out coding mode and the browser to stay tiny; they are in the uge
+  build. pagurus never drives your desktop. Add what else you need through MCP.
+- **Maturity.** 0.1.0 is the latest release; `main` is 0.2.0 in development, with about 190 tests. Discord, Slack,
+  email, the task board, the swarm, ssh, the sandbox and the browser have seen the least real use so far. The Windows
+  build has not been tried on a real Windows PC.
 
 ## Documentation
 
 | Page | What's in it |
 |---|---|
-| [Install](docs/install.md) | Every platform, Windows, the small and full builds, building from source |
+| [Install](docs/install.md) | Every platform, Windows, the small and uge builds, building from source |
 | [Talking to pagurus](docs/usage.md) | Commands, approvals, photos and voice; Telegram, Discord, Slack and email setup |
 | [Tools](docs/tools.md) | Every tool, MCP servers, other machines over ssh, the Docker sandbox |
 | [Models](docs/models.md) | Providers, local models, Anthropic, fallbacks, the chat / background / sub-agent roles |

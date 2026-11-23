@@ -22,7 +22,7 @@
 | `memory` · `skill_propose` · `skill_view` | Its long-term memory and skills: see [Learning](learning.md). |
 | `mcp_<server>_<tool>` | Tools from MCP servers you connect: see [MCP](#mcp). Each call asks you first unless you mark the tool read-only. |
 
-## Coding (full build)
+## Coding (uge build)
 
 pagurus works on one code base at a time, a **project folder**. Three ways in:
 
@@ -63,7 +63,7 @@ the uge build drives a real headless browser.
   or by visible text; **scroll**, **back**, **read** again. Screenshots are shown to the model (if it can see images)
   and saved under `workspace/browser/`, like PDFs, so pagurus can send them to you.
 - **Easy on a busy machine:** browsers run at the lowest CPU priority (`nice 19`), start on first use and close after
-  3 minutes without use (and when pagurus exits), so a Pi running services and a kiosk keeps them first.
+  3 minutes without use (and when pagurus exits), so the machine's own services keep the CPU and memory first (it matters on a Raspberry Pi).
 - **Safe by default:** a fresh, empty profile every time, so no access to your own browser's cookies or logins;
   only http(s) pages; cloud metadata addresses can't be reached; downloads are off. Page text counts as outside text
   (checked for prompt injection). **Typing asks you first** (site and text shown) unless yolo is on, and pagurus refuses
@@ -89,6 +89,9 @@ Every command pagurus wants to run is decided in one of these ways, and each dec
 | **auto** | `autonomy = "auto"`: commands made only of `auto_allow` entries (and allowlisted ones) also run unasked |
 | **yolo** | `/yolo 30m`: everything above the floor runs unasked, for at most 12 hours |
 | **blocked** | below the safety floor: never runs, whoever approves |
+
+In a chat, commands that run unasked after `/all` or during yolo are not posted one by one: the reply ends with one
+line saying how many ran (`✅ ran 4 commands without asking (/audit)`), and `/audit` lists them.
 
 **The safety floor** holds whatever you approve, including `/yes`, `/all` and yolo:
 

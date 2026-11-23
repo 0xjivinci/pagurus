@@ -1239,7 +1239,8 @@ fn about(cfg: &Config, home: &std::path::Path) -> String {
          - Long chats: older messages are folded into a running summary. Memory: USER.md and MEMORY.md (below) plus skills; \
            learning mode is {}; the user audits with /learn, /undo and /lock.\n\
          - Shell: read-only commands run directly; anything else is put to the user for approval (/yes on Telegram, y/N in \
-           the terminal). No root or sudo. Files: you can read anywhere except secrets; you write only in the workspace.\n\
+           the terminal); pagurus, not you, shows those requests, and after /all or /yolo it runs the rest quietly and \
+           counts them under your reply. No root or sudo. Files: you can read anywhere except secrets; you write only in the workspace.\n\
          - {}\n\
          - Images: photos the user sends arrive with their message, and view_image lets you look at an image file (e.g. \
            your own screenshot). Both work only if the current model can see images. send_file sends the user files and images.\n\
@@ -1585,7 +1586,7 @@ Model and status
   /model [n | background n]   list or switch models
   /status                  model, context use, tokens, yolo, learning
   /tools                   what pagurus can use right now
-Coding (full build)
+Coding (uge build)
   /project <folder> · /project off   work on a code base: edit there, grep/glob, run its tests, git
   /revert                  put back every file the last answer changed
 Safety
@@ -1805,9 +1806,9 @@ pub(crate) mod tests {
         let mut cfg = crate::config::Config::default();
         cfg.provider.model = "test".into();
         let mut a = super::Agent::new(home.clone(), cfg.clone(), false, "tg").unwrap();
-        a.push(Msg::user("is the kiosk up?"));
-        a.push(Msg::assistant("yes, olibith-kiosk is running"));
-        a.push(Msg::user("restart world-dashboard"));
+        a.push(Msg::user("is the dashboard up?"));
+        a.push(Msg::assistant("yes, home-dashboard is running"));
+        a.push(Msg::user("restart home-dashboard"));
         let call = crate::llm::ToolCall { id: "c9".into(), kind: "function".into(), function: crate::llm::FnCall { name: "shell".into(), arguments: "{}".into() }, extra: Default::default() };
         a.push(Msg { role: "assistant".into(), tool_calls: Some(vec![call]), ..Default::default() }); // pagurus stopped here
         let id = a.session.id.clone();
@@ -1815,7 +1816,7 @@ pub(crate) mod tests {
         let mut b = super::Agent::resume(home.clone(), cfg.clone(), "tg", &id).unwrap();
         assert_eq!(b.session.id, id, "same transcript");
         let texts: Vec<String> = b.history.iter().map(|m| m.content.clone().unwrap_or_default()).collect();
-        assert_eq!(texts, ["is the kiosk up?", "yes, olibith-kiosk is running", "restart world-dashboard"], "the unanswered tool call is dropped");
+        assert_eq!(texts, ["is the dashboard up?", "yes, home-dashboard is running", "restart home-dashboard"], "the unanswered tool call is dropped");
         b.push(Msg::assistant("done"));
         assert_eq!(b.session.messages().len(), 5, "new messages go to the same file");
         let fresh = super::Agent::resume(home.clone(), cfg, "tg", "no-such-session").unwrap();

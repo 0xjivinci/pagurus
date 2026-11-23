@@ -40,7 +40,7 @@ you're most likely to touch:
   skills/<name>/SKILL.md   skills/.archive/   skills/.usage.json
   sessions/*.jsonl                        transcripts (searchable)
   index/sessions.idx                      search index (small build; rebuilt from the transcripts if deleted)
-  index/sessions.db                       search index (full build: SQLite FTS5)
+  index/sessions.db                       search index (uge build: SQLite FTS5)
   learn/ledger.jsonl  learn/pending/  learn/rejected/
   workspace/                              where file tools may write
   workspace/.tool-output/                 long tool output, for paging

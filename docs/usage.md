@@ -6,7 +6,7 @@
 
 **Terminal:** `pagurus` (or `pagurus chat`). Type normally. Commands start with `/` (`/help` lists them).
 
-The full build's terminal chat (Linux and macOS) is richer: answers appear as they are written, a spinner shows while
+The uge build's terminal chat (Linux and macOS) is richer: answers appear as they are written, a spinner shows while
 the model thinks, each tool call is shown with its outcome and time, and a status line under every answer gives the
 model, tokens, time, how full the context is and any yolo time left.
 
@@ -35,7 +35,7 @@ model, tokens, time, how full the context is and any yolo time left.
 | `/learn` · `/undo <id>` · `/lock <memory\|user\|skill>` | see and govern what it learned |
 | `/tasks` · `/skills` · `/curate` · `/tidy` | standing tasks · skills · tidy the skill library · tidy memory |
 | `/health` | busy or idle, models cooling down, unsent messages, memory use |
-| `/yes` · `/no` · `/all` | answer an approval request (`/all` = everything for this message) |
+| `/yes` · `/no` · `/all` | answer an approval request (`/all` = everything for this message; the rest run quietly and the reply ends with how many ran) |
 | `/yolo 30m` · `/yolo off` | run commands without asking for a while (at most 12 h; the [safety floor](tools.md#approvals-the-safety-floor-and-yolo) stays) |
 | `/audit` · `/audit all` | what ran recently and who decided (`all` includes read-only commands) |
 

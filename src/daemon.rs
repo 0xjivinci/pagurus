@@ -535,6 +535,8 @@ struct Daemon {
     trusted: Option<i64>,
     /// `/yolo`: this chat's commands run without asking until then (never background work).
     yolo: Option<(i64, u64)>,
+    /// Commands run without asking (/all or yolo) since the chat's last reply, told as one line with it.
+    quiet_runs: HashMap<i64, usize>,
     inflight: usize,
     heartbeat_running: bool,
     checks_running: bool,
@@ -602,10 +604,18 @@ impl Daemon {
                     // sent too late for the turn to see: run them next
                     c.queue.extend(c.inbox.lock().map(|mut q| q.drain(..).collect::<Vec<_>>()).unwrap_or_default());
                 }
-                let text = match self.yolo_left(chat) {
-                    Some(left) => format!("{text}\n\n⚡ yolo {} left", crate::autonomy::fmt_left(left)),
-                    None => text,
+                let ran = match self.quiet_runs.remove(&chat).unwrap_or(0) {
+                    0 => String::new(),
+                    1 => "ran 1 command without asking (/audit)".into(),
+                    n => format!("ran {n} commands without asking (/audit)"),
                 };
+                let foot = match (self.yolo_left(chat), ran.is_empty()) {
+                    (Some(left), true) => format!("⚡ yolo {} left", crate::autonomy::fmt_left(left)),
+                    (Some(left), false) => format!("⚡ yolo {} left · {ran}", crate::autonomy::fmt_left(left)),
+                    (None, false) => format!("✅ {ran}"),
+                    (None, true) => String::new(),
+                };
+                let text = if foot.is_empty() { text } else { format!("{text}\n\n{foot}") };
                 self.say(chat, &text);
                 self.attachments(chat);
                 if let (true, Some(t)) = (crate::voice::should_speak(&self.cfg.voice, chat), self.ch.clone()) {
@@ -675,13 +685,13 @@ impl Daemon {
             Event::Approval { chat, cmd, answer } if self.yolo_left(chat).is_some() => {
                 eprintln!("pagurus: chat {chat} APPROVED (yolo) `{cmd}`");
                 crate::autonomy::audit(&self.home, "yolo", &cmd);
-                self.say(chat, &format!("⚡ {}", crate::util::one_line(&cmd, 200)));
+                *self.quiet_runs.entry(chat).or_default() += 1;
                 let _ = answer.send(true);
             }
             Event::Approval { chat, cmd, answer } if self.trusted == Some(chat) => {
                 eprintln!("pagurus: chat {chat} APPROVED (via /all) `{cmd}`");
                 crate::autonomy::audit(&self.home, "all", &cmd);
-                self.say(chat, &format!("✅ running (approved for this message): {}", crate::util::one_line(&cmd, 200)));
+                *self.quiet_runs.entry(chat).or_default() += 1;
                 let _ = answer.send(true);
             }
             Event::Ask { chat, text, options } => match &self.ch {
@@ -800,7 +810,7 @@ impl Daemon {
                     }
                     "/all" => {
                         self.trusted = Some(chat);
-                        self.answer(true, "all", "✅ approved — and everything else it runs for this message");
+                        self.answer(true, "all", "✅ approved, and the rest of this message's commands run without asking (listed in /audit)");
                         return None;
                     }
                     _ => {}
@@ -1099,6 +1109,7 @@ pub fn run(home: PathBuf, cfg: Config) -> Result<(), String> {
         waiting: VecDeque::new(),
         trusted: None,
         yolo: None,
+        quiet_runs: Default::default(),
         inflight: 0,
         heartbeat_running: false,
         checks_running: false,
@@ -1386,6 +1397,7 @@ mod tests {
             waiting: Default::default(),
             trusted: None,
             yolo: None,
+            quiet_runs: Default::default(),
             inflight: 0,
             heartbeat_running: false,
             checks_running: false,
@@ -1405,5 +1417,39 @@ mod tests {
         // between the reply and the end of reflection, messages queue as before
         assert!(d.message(7, "thanks", vec![]).unwrap().starts_with("⏳"));
         assert_eq!(d.chats[&7].queue.len(), 2);
+    }
+
+    #[test]
+    fn commands_approved_with_all_run_quietly_and_are_counted_under_the_reply() {
+        let home = std::env::temp_dir().join(format!("pagurus-quiet-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&home);
+        let (jobs, _rx) = std::sync::mpsc::channel();
+        let mut d = super::Daemon {
+            home: home.clone(),
+            cfg: Default::default(),
+            ch: None,
+            jobs,
+            chats: Default::default(),
+            pending: None,
+            waiting: Default::default(),
+            trusted: Some(7),
+            yolo: None,
+            quiet_runs: Default::default(),
+            inflight: 0,
+            heartbeat_running: false,
+            checks_running: false,
+            check_state: Default::default(),
+            last_alert: Default::default(),
+            started: 0,
+        };
+        for cmd in ["mkdir out", "cp a out/"] {
+            let (tx, rx) = std::sync::mpsc::channel();
+            d.event(super::Event::Approval { chat: 7, cmd: cmd.into(), answer: tx });
+            assert!(rx.recv().unwrap(), "approved without asking");
+        }
+        assert_eq!(d.quiet_runs[&7], 2);
+        d.event(super::Event::Reply { chat: 7, text: "done".into() });
+        assert!(d.quiet_runs.is_empty() && d.trusted.is_none(), "counted once, then /all ends with the reply");
+        let _ = std::fs::remove_dir_all(&home);
     }
 }

@@ -8,11 +8,11 @@ Use when the disk is nearly full or the user asks where the space went.
 ## Steps
 1. `df -h` to see which filesystem is full. The SD card is usually `/`.
 2. `du -xh --max-depth=1 /home` and then go one level deeper into the biggest folder. `du` is allowlisted. Use absolute paths, and run each folder as its own command.
-3. Common space hogs on a Pi:
+3. Common space hogs on Linux:
    - the system journal: `journalctl --disk-usage` (needs approval)
    - the apt package cache under `/var/cache/apt/archives`
    - old logs in `/var/log`
-   - browser caches in `~/.cache` (Chromium kiosks grow this)
+   - browser caches in `~/.cache` (browsers grow this)
    - forgotten downloads, backups, and `node_modules` folders
    - Docker images, if Docker is used
 

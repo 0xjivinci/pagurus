@@ -56,7 +56,7 @@ usage:
   pagurus setup                 guided setup: model, key, Telegram, service
   pagurus init                  create ~/.pagurus (or $PAGURUS_HOME) non-interactively
   pagurus [chat]                interactive session
-  pagurus code [folder]         (full build) chat about a code base: edit it, search it, run its tests, use git
+  pagurus code [folder]         (uge build) chat about a code base: edit it, search it, run its tests, use git
   pagurus run [--yolo[=30m]] <prompt…>   one-shot (also reads the prompt from stdin); --yolo: no approvals
   pagurus audit [all]           commands that ran and who decided (you, auto, yolo, blocked …)
   pagurus daemon                heartbeat + chat gateway: Telegram, Discord, Slack, email (the background service)

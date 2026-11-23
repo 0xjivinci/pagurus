@@ -1967,14 +1967,14 @@ mod tests {
     }
 
     #[test]
-    fn pi_monitoring_checks_run_without_approval() {
+    fn monitoring_checks_run_without_approval() {
         let home = std::env::temp_dir();
         let allow: Vec<String> = crate::config::SAFE_COMMANDS.iter().map(|s| s.to_string()).collect();
         for cmd in [
-            "systemctl is-active anoniverse anoniverse-tunnel world-dashboard world-presence olibith-button | grep -vc '^active$'",
-            "pgrep -c -x olibith-kiosk",
-            "pgrep -c -f '[w]orld-kiosk'",
-            "journalctl -u anoniverse-tunnel --since '-6 min' --no-pager | grep -c trycloudflare.com",
+            "systemctl is-active nginx caddy home-dashboard backup-sync door-sensor | grep -vc '^active$'",
+            "pgrep -c -x home-dashboard",
+            "pgrep -c -f '[p]hoto-frame'",
+            "journalctl -u backup-sync --since '-6 min' --no-pager | grep -c error",
         ] {
             assert_eq!(super::needs_approval(&home, &allow, cmd), None, "{cmd}");
         }

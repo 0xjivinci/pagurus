@@ -31,9 +31,10 @@ choose Telegram in `pagurus setup`, and chat with it from the Telegram app.
 
 **From source:** `cargo build --release` (Rust 1.82+). `scripts/build-release.sh` builds every platform with Docker.
 
-**Two builds.** The small build (about 3 MB) has everything in these docs unless marked *full build*. The full build
-adds optional features that cost binary size: today SQLite FTS5 for session search (~3.5 MB in all). Get it from the
+**Two builds.** The small build (about 3 MB) has everything in these docs unless marked *uge build*. The uge build
+(about 4 MB, at most 10 MiB) is for laptops and servers and adds what costs binary size: the richer terminal chat, coding
+mode, a headless browser, the skills hub, Tezos art research and SQLite FTS5 for session search. Get it from the
 releases page (`pagurus-full-linux-arm64`, `pagurus-full-macos-arm64`) or build it with
-`cargo build --release --features full` (`--features sqlite` for just that one). Both read the same `~/.pagurus`.
+`cargo build --release --features uge` (or single features: `tui`, `code`, `browser`, `hub`, `art`, `sqlite`). Both read the same `~/.pagurus`.
 
 `pagurus setup` writes `~/.pagurus/config.toml` and keeps secrets in `~/.pagurus/env` (mode 600), never in the config.

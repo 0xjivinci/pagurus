@@ -12,7 +12,7 @@
   tasks: up to `agent.delegate_parallel` (3) sub-agents run at once, each with a fresh context, and their reports come back
   together. Their commands still need your approval, asked one at a time and marked with which sub-agent asks.
 - **Recall.** `session_search` looks through every past conversation, CLI and Telegram alike. The small build keeps a
-  compact BM25 index next to the transcripts, updated with just the new lines before each search; the full build uses
+  compact BM25 index next to the transcripts, updated with just the new lines before each search; the uge build uses
   SQLite FTS5 (with stemming) instead and indexes your existing transcripts on its first search. Results are ranked,
   at most two per conversation, each with a snippet around the match and the messages before and after it.
 - **Limits.** 16 tool rounds and 10 minutes per message. If pagurus stops early it says so, and "continue" resumes.
