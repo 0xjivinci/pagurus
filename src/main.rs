@@ -6,6 +6,8 @@ mod art_eth;
 #[cfg(feature = "art")]
 mod art_find;
 #[cfg(feature = "art")]
+mod art_report;
+#[cfg(feature = "art")]
 mod art_taste;
 #[cfg(feature = "art")]
 mod art_dash;

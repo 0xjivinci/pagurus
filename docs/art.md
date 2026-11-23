@@ -19,6 +19,7 @@ valid 7 days, renewed automatically) and stores it in `~/.pagurus/env`. Your own
 - "Who collects my work?" (after telling it your address)
 - "How did my work sell this month, and what did I earn in royalties?"
 - "What's in my collection?" (your public tz… address)
+- "Find 10 voxel artists and make me a PDF of their best pieces with the stats"
 
 Two bundled skills guide it: `art-collector` and `art-artist`. It can also look at a piece's preview image (`look`) when your model can see images.
 
@@ -34,6 +35,21 @@ ask and recent sales. Then red flags to look at before buying:
 - the asking price is more than 3× the median sale
 
 No red flags means nothing obvious showed up, not that a piece is safe.
+
+## Reports (PDF)
+
+`report` makes a PDF of chosen pieces, or of artists' best-selling works, and sends it with the reply. Each piece
+gets its image (downloaded by pagurus and embedded, so the PDF never shows empty boxes) and its market numbers:
+mint date, edition and holders, sold out or still open at primary (how many left, at what price), floor and how
+many are listed, number of sales (all and last 30 days), volume, last and highest sale. A summary table comes first.
+It is printed by Chromium, Chrome, Brave or Edge if one is installed; otherwise you get the HTML page. Files land in
+`workspace/reports/`.
+
+## Styles
+
+`style` ranks artists whose recent work carries a tag by different collectors. When few turn up (a niche like voxel),
+it widens the search: every spelling of the tag (voxel, voxels, voxelart…) and titles, any date, ranked by how many
+different people collected that work.
 
 ## Commands
 
@@ -52,6 +68,7 @@ pagurus art collectors <who> [n]      # who holds their work
 pagurus art holdings <who> [n]        # a wallet's collection
 pagurus art piece <objkt link | KT1…/id>
 pagurus art look <objkt link | KT1…/id>   # fetch the preview image
+pagurus art report <pieces and/or artists…>  # PDF with images and market stats
 ```
 
 `<who>` is a tz… address, a `.tez` name, an objkt username or X handle (matched loosely), or for Ethereum an 0x… address or OpenSea username

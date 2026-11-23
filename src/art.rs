@@ -113,11 +113,11 @@ pub(crate) fn num(v: &Value) -> Option<i64> {
     v.as_i64().or_else(|| v.as_str().and_then(|s| s.parse().ok())).or_else(|| v.as_f64().map(|f| f as i64))
 }
 
-fn day(ts: &Value) -> String {
+pub(crate) fn day(ts: &Value) -> String {
     ts.as_str().unwrap_or("").chars().take(10).collect()
 }
 
-fn piece_url(contract: &str, id: &str) -> String {
+pub(crate) fn piece_url(contract: &str, id: &str) -> String {
     format!("https://objkt.com/tokens/{contract}/{id}")
 }
 
@@ -690,7 +690,7 @@ pub(crate) fn image_urls(uri: &str) -> Vec<String> {
     }
 }
 
-fn fetch_image(urls: &[String]) -> Result<Vec<u8>, String> {
+pub(crate) fn fetch_image(urls: &[String]) -> Result<Vec<u8>, String> {
     let mut last = "no image link".to_string();
     for u in urls {
         match agent().get(u).call() {
@@ -805,28 +805,32 @@ pub fn lowest_ask(spec: &str) -> Result<Option<f64>, String> {
 pub fn tool_definition() -> Value {
     json!({ "type": "function", "function": {
         "name": "art",
-        "description": "Read-only crypto-art research (Tezos/objkt; Ethereum/OpenSea with chain=ethereum or 0x… targets): artists, works, sales, royalties, collectors, a wallet's \
-            collection, and checks before buying (provenance, edition, red flags). Discover: trending, quiet (sold before, silent \
-            now), new, style (tag), similar (\"collected by the same people as X\", \"artists like X\": one call), search \
-            (names). look = see a piece's image yourself. Never buys. Not financial advice. action=watch sets a free alert: kind new|sold (who) or ask (piece, below). \
-            Taste: rate (piece, verdict love|like|pass, why) whenever the user reacts to a piece; taste (profile + evidence; note= rewrites it); \
-            wish/unwish/wishlist; propose (piece, why, fit 1-5) records a weekly pick within budget; proposals; budget; weekly schedules the round.",
+        "description": "Read-only crypto-art research (Tezos/objkt; Ethereum/OpenSea via chain=ethereum or 0x…): artists, works, sales, collectors, \
+            wallets, checks before buying (provenance, red flags). Discover: trending, quiet (sold before, silent now), new, style (tag), \
+            similar (\"artists like X\": one call), search (names). look = see a piece's image. report = PDF of pieces and/or who \
+            (artists) with images and market stats, attached for you. Name only artists and works art returned; never fill a list from memory. \
+            Never buys. Not financial advice. watch = free alert: kind new|sold (who) or ask (piece, below). \
+            Taste: rate (piece, verdict, why) whenever the user reacts to a piece; taste (note= rewrites it); \
+            wish/unwish/wishlist; propose (piece, why, fit 1-5) a weekly pick within budget; proposals; budget; weekly schedules the round.",
         "parameters": { "type": "object", "properties": {
-            "action": { "type": "string", "enum": ["trending", "quiet", "new", "style", "similar", "search", "artist", "works", "piece", "collection", "look", "sales", "collectors", "holdings", "watch",
+            "action": { "type": "string", "enum": ["trending", "quiet", "new", "style", "similar", "search", "artist", "works", "piece", "collection", "look", "report", "sales", "collectors", "holdings", "watch",
                 "rate", "taste", "wish", "unwish", "wishlist", "propose", "proposals", "budget", "weekly"] },
             "verdict": { "type": "string", "enum": ["love", "like", "pass"] },
             "why": { "type": "string", "description": "rate: the user's reason; propose: why it fits their taste" },
             "note": { "type": "string" },
             "fit": { "type": "integer", "description": "propose: 1-5" },
             "chain": { "type": "string", "enum": ["tezos", "ethereum"] },
-            "who": { "type": "string", "description": "tz…/.tez/objkt name, or 0x…/OpenSea username" },
+            "who": { "type": "string", "description": "tz…/.tez/name, or 0x…/OpenSea name" },
             "piece": { "type": "string", "description": "objkt/OpenSea link, KT1…/id or 0x…/id" },
+            "pieces": { "type": "array", "items": { "type": "string" } },
+            "per": { "type": "integer", "description": "report: works per artist" },
+            "title": { "type": "string" },
             "kind": { "type": "string", "enum": ["new", "sold", "ask"] },
-            "below": { "type": "number", "description": "watch kind=ask: alert under this many tez" },
-            "every_minutes": { "type": "integer", "description": "watch: how often (default 30)" },
-            "tag": { "type": "string", "description": "style: e.g. generative, pixelart, photography" },
+            "below": { "type": "number", "description": "ask: alert below (tez)" },
+            "every_minutes": { "type": "integer", "description": "watch" },
+            "tag": { "type": "string", "description": "style, e.g. pixelart" },
             "sort": { "type": "string", "enum": ["collectors", "volume"] },
-            "days": { "type": "integer", "description": "window (sales 30, trending 7, quiet: silent for 60, new: started within 60)" },
+            "days": { "type": "integer", "description": "window in days" },
             "limit": { "type": "integer" }
         } }
     }})
@@ -867,6 +871,8 @@ pub fn run_tool(home: &std::path::Path, a: &Value) -> Result<String, String> {
         "" if !who.is_empty() => "artist",
         x => x,
     };
+    // `query` is what models reach for when searching by name
+    let who = if who.is_empty() && action == "search" { a["query"].as_str().unwrap_or("") } else { who };
     if who.is_empty() && matches!(action, "artist" | "works" | "sales" | "collectors" | "holdings" | "similar" | "search") {
         return Err("no artist or wallet given. To find artists use action=trending, quiet, new, style or similar; otherwise ask the user".into());
     }
@@ -877,6 +883,7 @@ pub fn run_tool(home: &std::path::Path, a: &Value) -> Result<String, String> {
         "style" => crate::art_find::style(a["tag"].as_str().unwrap_or(who), a["days"].as_u64().unwrap_or(30), n),
         "similar" => crate::art_find::similar(who, n),
         "search" => crate::art_find::search_report(who),
+        "report" => crate::art_report::report(home, a),
         "collection" => crate::art_find::collection(if piece_arg.is_empty() { who } else { piece_arg }),
         "artist" => artist(who, n),
         "works" => works(who, n),
@@ -975,6 +982,7 @@ pub const USAGE: &str = "usage: pagurus art trending [days] [n] [volume]
        pagurus art artist|works|sales|collectors|holdings <who> [n|days]
        pagurus art piece <objkt link | KT1…/id>
        pagurus art look <objkt link | KT1…/id>    fetch the preview image
+       pagurus art report <pieces and/or artists…>  PDF with images and market stats (workspace/reports)
   your taste (also on Ethereum):
        pagurus art rate <piece> love|like|pass [why] · taste · wish <piece> [note] · unwish <piece> · wishlist
        pagurus art proposals · propose <piece> <fit 1-5> <why> · budget · weekly [day] [HH:MM]   (wallets and budget: [art] in config.toml)
@@ -1031,6 +1039,10 @@ pub fn cli(args: &[String]) -> Result<String, String> {
         "style" => crate::art_find::style(a(1), n(2, 30), n(3, 10) as usize),
         "similar" => crate::art_find::similar(a(1), n(2, 10) as usize),
         "search" => crate::art_find::search_report(&args[1..].join(" ")),
+        "report" => {
+            let (pieces, who): (Vec<&String>, Vec<&String>) = args[1..].iter().partition(|x| parse_piece(x).is_some());
+            crate::art_report::report(&home, &json!({ "pieces": pieces, "who": who, "per": 2 }))
+        }
         "collection" => crate::art_find::collection(a(1)),
         "artist" => artist(a(1), n(2, 10) as usize),
         "works" => works(a(1), n(2, 20) as usize),

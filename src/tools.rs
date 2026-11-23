@@ -893,6 +893,18 @@ pub fn show_image(label: String, data_url: String) {
     }
 }
 
+/// Queue a file to go to the user with the reply, as send_file does.
+#[cfg(feature = "art")]
+pub(crate) fn attach(path: PathBuf, caption: String) {
+    if let Ok(mut q) = ATTACHMENTS.lock() {
+        q.push((path, caption));
+    }
+}
+
+pub fn has_attachments() -> bool {
+    ATTACHMENTS.lock().is_ok_and(|q| !q.is_empty())
+}
+
 pub fn take_attachments() -> Vec<(PathBuf, String)> {
     ATTACHMENTS.lock().map(|mut q| std::mem::take(&mut *q)).unwrap_or_default()
 }

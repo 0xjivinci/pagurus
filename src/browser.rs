@@ -520,6 +520,13 @@ fn picture(home: &Path, b: &mut Browser, action: &str) -> Result<String, String>
         crate::tools::show_image(format!("screenshot of {}", b.url()), format!("data:image/jpeg;base64,{data}"));
         return Ok(format!("Screenshot attached below for you to look at, saved as {}. To give it to the user, send_file that path.", file.display()));
     }
+    let bytes = pdf_bytes(b)?;
+    let file = save(home, &b.url(), "pdf", &bytes)?;
+    Ok(format!("Saved the page as a PDF ({} KB): {}. To give it to the user, send_file that path.", bytes.len() / 1024, file.display()))
+}
+
+/// What `b` shows, printed to PDF.
+fn pdf_bytes(b: &mut Browser) -> Result<Vec<u8>, String> {
     let r = b.call("Page.printToPDF", json!({ "printBackground": true, "transferMode": "ReturnAsStream" }))?;
     let stream = r["stream"].as_str().ok_or("browser: no PDF stream")?.to_string();
     let mut bytes = Vec::new();
@@ -533,8 +540,19 @@ fn picture(home: &Path, b: &mut Browser, action: &str) -> Result<String, String>
         }
     }
     let _ = b.call("IO.close", json!({ "handle": stream }));
-    let file = save(home, &b.url(), "pdf", &bytes)?;
-    Ok(format!("Saved the page as a PDF ({} KB): {}. To give it to the user, send_file that path.", bytes.len() / 1024, file.display()))
+    Ok(bytes)
+}
+
+/// Print a local HTML file pagurus wrote (a report) to `pdf`, in a Chromium of its
+/// own that closes right after. Used whatever `tools.browser` says: it opens only
+/// this file, never the web.
+pub fn print_to_pdf(home: &Path, html: &Path, pdf: &Path) -> Result<(), String> {
+    let exe = find_chromium().ok_or("no Chromium-family browser to print the PDF")?;
+    let mut b = launch(home, &exe, "-print")?;
+    b.call("Page.navigate", json!({ "url": format!("file://{}", html.display()) }))?;
+    b.settle(30);
+    let bytes = pdf_bytes(&mut b)?;
+    std::fs::write(pdf, &bytes).map_err(|e| format!("{}: {e}", pdf.display()))
 }
 
 /// A file in workspace/browser named after the page's host.

@@ -421,7 +421,7 @@ impl Agent {
                         continue;
                     }
                 }
-                if !sent_file && !claim_checked && round < rounds && claims_sending(&text) {
+                if !sent_file && !crate::tools::has_attachments() && !claim_checked && round < rounds && claims_sending(&text) {
                     claim_checked = true;
                     self.push(Msg::user(
                         "[pagurus: your answer says a file or image is being sent, but you haven't called send_file in this \

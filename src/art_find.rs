@@ -297,7 +297,9 @@ pub fn style(tag: &str, days: u64, n: usize) -> Result<String, String> {
         }
     }
     if pks.is_empty() {
-        return Ok(format!("{NOTE}\nNo artworks tagged \"{tag}\" were minted in the last 90 days. Tags are exact: try a related one.\n"));
+        let mut out = format!("{NOTE}\nNo artworks tagged \"{tag}\" were minted in the last 90 days.\n");
+        out += &makers(tag, &HashSet::new(), n.clamp(1, 25))?;
+        return Ok(out);
     }
     // 2. their sales in the window
     let q = format!(
@@ -328,9 +330,109 @@ pub fn style(tag: &str, days: u64, n: usize) -> Result<String, String> {
         );
     }
     if list.is_empty() {
-        out += "- no artist sold to 2+ collectors with that tag lately; try a longer period or a related tag\n";
+        out += "- no artist sold to 2+ collectors with that tag lately\n";
+    }
+    let want = n.clamp(1, 25);
+    if list.len() < want {
+        let shown: HashSet<String> = list.iter().take(want).map(|(a, _)| a.clone()).collect();
+        out += &makers(tag, &shown, want - list.len().min(want))?;
     }
     out += "Tags are chosen by artists, so they're rough: look an artist up to see the work.\n";
+    Ok(out)
+}
+
+/// Spellings artists use for one style: voxel → voxel, voxels, voxelart.
+fn tag_variants(tag: &str) -> Vec<String> {
+    let t = tag.to_lowercase();
+    let stem = t.strip_suffix("art").filter(|s| s.len() >= 3).unwrap_or(&t).trim_end_matches(['-', '_', ' ']).to_string();
+    let mut v = vec![tag.to_string(), t.clone(), stem.clone(), format!("{stem}art"), format!("{stem}s"), format!("{stem}-art"), format!("{stem} art")];
+    let mut seen = HashSet::new();
+    v.retain(|x| x.len() >= 2 && seen.insert(x.clone()));
+    v
+}
+
+/// The wider search when few artists sold the style lately: everyone who ever
+/// minted work tagged with any spelling of it, or with it in the title, ranked by
+/// different collectors over the past year, then by how many such works they made.
+fn makers(tag: &str, shown: &HashSet<String>, n: usize) -> Result<String, String> {
+    let tags = tag_variants(tag);
+    let low = tag.to_lowercase();
+    let stem = low.strip_suffix("art").filter(|s| s.len() >= 3).unwrap_or(&low).trim_end_matches(['-', '_', ' ']).to_string();
+    const WHO: &str = "pk timestamp creators { creator_address holder { alias tzdomain flag flag_reason } }";
+    let tq = format!(
+        "query($tags: [String!]!) {{ token(where: {{tags: {{tag: {{name: {{_in: $tags}}}}}}, supply: {{_gt: 0}}}}, \
+         order_by: {{timestamp: desc}}, limit: 500) {{ {WHO} }} }}"
+    );
+    let mut found = gql(&tq, json!({ "tags": tags }))?["token"].as_array().cloned().unwrap_or_default();
+    // titles too; unsorted, because sorting a title search times out on objkt
+    let nq = format!("query($name: String!) {{ token(where: {{name: {{_ilike: $name}}, supply: {{_gt: 0}}}}, limit: 300) {{ {WHO} }} }}");
+    if let Ok(d) = gql(&nq, json!({ "name": format!("%{stem}%") })) {
+        found.extend(d["token"].as_array().cloned().unwrap_or_default());
+    }
+    // artist → (label, works, latest mint); and the works themselves
+    let mut by: HashMap<String, (String, usize, String)> = HashMap::new();
+    let mut pks: Vec<i64> = Vec::new();
+    for t in found {
+        let Some(pk) = num(&t["pk"]) else { continue };
+        if pks.contains(&pk) {
+            continue;
+        }
+        let Some(cr) = t["creators"].get(0) else { continue };
+        let Some(a) = cr["creator_address"].as_str() else { continue };
+        if a == BURN || a.starts_with("KT1") || !flag_of(&cr["holder"]).is_empty() || shown.contains(a) {
+            continue;
+        }
+        pks.push(pk);
+        let e = by.entry(a.to_string()).or_insert_with(|| (holder_label(&cr["holder"], a), 0, String::new()));
+        e.1 += 1;
+        let ts = t["timestamp"].as_str().unwrap_or("").to_string();
+        if ts > e.2 {
+            e.2 = ts;
+        }
+    }
+    if by.is_empty() {
+        return Ok(format!("No artist on objkt tagged or titled work \"{stem}\" (tried {}). Try a related style.\n", tags.join(", ")));
+    }
+    // who collected these very works (any date): the style's real audience
+    // in batches: one query over hundreds of works times out on objkt
+    let sq = format!(
+        "query($p: [bigint!]!) {{ event(where: {{token_pk: {{_in: $p}}, {SALE_FILTER}}}, limit: 500) {{ {SALE_FIELDS} {CREATOR_FIELDS} }} }}"
+    );
+    let (mut events, mut failed) = (Vec::new(), 0);
+    for chunk in pks.chunks(100) {
+        match gql(&sq, json!({ "p": chunk })) {
+            Ok(d) => events.extend(d["event"].as_array().cloned().unwrap_or_default()),
+            Err(_) => failed += 1,
+        }
+    }
+    let note = if failed > 0 { format!("(sales of {failed} batch(es) of works couldn't be loaded: counts are low)\n") } else { String::new() };
+    let rows: Vec<(Value, Value)> = events
+        .into_iter()
+        .map(|e| (sale(&e), e["token"]["creators"].get(0).cloned().unwrap_or(Value::Null)))
+        .collect();
+    let stats = tally(&rows);
+    let mut list: Vec<(String, usize, usize, i64, String, String)> = by
+        .keys()
+        .map(|a| {
+            let (label, works, latest) = by[a].clone();
+            let (buyers, vol) = stats.get(a).map_or((0, 0), |s| (s.buyers.len(), s.volume));
+            (a.clone(), buyers, works, vol, label, latest)
+        })
+        .collect();
+    list.sort_by(|x, y| y.1.cmp(&x.1).then(y.2.cmp(&x.2)));
+    let mut out = format!(
+        "\nMore artists who made \"{stem}\" work (tags {} or the title; any date), by different collectors of that work:\n",
+        tags.join(", ")
+    );
+    out += &note;
+    for (a, buyers, works, vol, label, latest) in list.iter().take(n) {
+        out += &format!(
+            "- {label} · {works} such work(s), latest minted {} · {buyers} collector(s), {} sold · {}\n",
+            when(&Value::String(latest.clone())),
+            tez(*vol),
+            profile_url(a)
+        );
+    }
     Ok(out)
 }
 
