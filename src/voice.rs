@@ -2,6 +2,8 @@
 //! are transcribed by any OpenAI-compatible `/audio/transcriptions` endpoint
 //! (OpenAI, Groq, a local whisper server), and replies can be spoken through
 //! an `/audio/speech` endpoint. Off unless configured in `[voice]`.
+//! `provider = "gemini"` does both with one Gemini key instead: Gemini listens to
+//! the note, and its TTS voices speak, turned into a voice note by ffmpeg.
 
 use serde::Deserialize;
 use std::collections::HashSet;
@@ -12,6 +14,11 @@ use std::time::Duration;
 #[derive(Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct VoiceCfg {
+    /// `openai` (default): the OpenAI-compatible endpoints below · `gemini`: Google's Gemini API for both,
+    /// with `key_env` (default GEMINI_API_KEY); no URLs needed.
+    pub provider: String,
+    /// Gemini: env var holding the key.
+    pub key_env: String,
     /// Base URL for speech-to-text, e.g. https://api.groq.com/openai/v1. Empty = voice notes are not understood.
     pub stt_url: String,
     pub stt_model: String,
@@ -29,6 +36,8 @@ pub struct VoiceCfg {
 impl Default for VoiceCfg {
     fn default() -> Self {
         Self {
+            provider: "openai".into(),
+            key_env: "GEMINI_API_KEY".into(),
             stt_url: String::new(),
             stt_model: "whisper-1".into(),
             stt_key_env: String::new(),
@@ -82,16 +91,121 @@ pub fn multipart(
     (format!("multipart/form-data; boundary={boundary}"), body)
 }
 
+const GEMINI: &str = "https://generativelanguage.googleapis.com/v1beta/models";
+
+fn gemini(c: &VoiceCfg) -> bool {
+    c.provider.eq_ignore_ascii_case("gemini")
+}
+
+/// Can voice notes be understood?
+pub fn listening(c: &VoiceCfg) -> bool {
+    gemini(c) || !c.stt_url.trim().is_empty()
+}
+
+/// Can replies be spoken?
+pub fn speaking(c: &VoiceCfg) -> bool {
+    gemini(c) || !c.tts_url.trim().is_empty()
+}
+
+/// The configured model, or Gemini's when the OpenAI default was left in place.
+fn pick<'a>(set: &'a str, openai_default: &str, gemini_default: &'a str) -> &'a str {
+    if set.trim().is_empty() || set == openai_default {
+        gemini_default
+    } else {
+        set
+    }
+}
+
+fn gemini_call(c: &VoiceCfg, model: &str, body: serde_json::Value) -> Result<serde_json::Value, String> {
+    let k = key(&c.key_env).ok_or_else(|| format!("voice: set {} in ~/.pagurus/env", c.key_env))?;
+    match http().post(&format!("{GEMINI}/{model}:generateContent")).set("x-goog-api-key", &k).send_json(body) {
+        Ok(r) => r.into_json().map_err(|e| format!("gemini: {e}")),
+        Err(ureq::Error::Status(code, r)) => Err(format!(
+            "gemini {model}: HTTP {code} {}",
+            crate::util::one_line(&r.into_string().unwrap_or_default(), 160)
+        )),
+        Err(e) => Err(format!("gemini {model}: {e}")),
+    }
+}
+
+fn gemini_transcribe(c: &VoiceCfg, audio: &[u8]) -> Result<String, String> {
+    let model = pick(&c.stt_model, "whisper-1", "gemini-flash-lite-latest");
+    let body = serde_json::json!({ "contents": [{ "parts": [
+        { "text": "Transcribe this voice message exactly, in the language it is spoken in. Reply with the transcript only; if there are no words, reply with nothing." },
+        { "inline_data": { "mime_type": "audio/ogg", "data": crate::util::base64(audio) } }
+    ]}]});
+    let v = gemini_call(c, model, body)?;
+    Ok(v["candidates"][0]["content"]["parts"][0]["text"].as_str().unwrap_or("").trim().to_string())
+}
+
+fn gemini_speak(c: &VoiceCfg, text: &str) -> Result<Vec<u8>, String> {
+    let model = pick(&c.tts_model, "tts-1", "gemini-3.8-flash-lite-tts");
+    let voice = pick(&c.tts_voice, "alloy", "Kore");
+    let body = serde_json::json!({
+        "contents": [{ "parts": [{ "text": speakable(text) }] }],
+        "generationConfig": { "responseModalities": ["AUDIO"],
+            "speechConfig": { "voiceConfig": { "prebuiltVoiceConfig": { "voiceName": voice } } } }
+    });
+    let v = gemini_call(c, model, body)?;
+    let part = &v["candidates"][0]["content"]["parts"][0]["inlineData"];
+    let audio = part["data"].as_str().and_then(crate::util::unbase64).ok_or("gemini sent no audio")?;
+    to_voice_note(&audio, part["mimeType"].as_str().unwrap_or(""))
+}
+
+/// ffmpeg input flags for Gemini's audio: WAV is self-describing, raw L16 PCM needs its rate.
+fn pcm_args(mime: &str) -> Vec<String> {
+    if !mime.starts_with("audio/L16") && !mime.contains("pcm") {
+        return vec![];
+    }
+    let rate = mime.split(';').find_map(|p| p.trim().strip_prefix("rate=")).unwrap_or("24000");
+    ["-f", "s16le", "-ar", rate, "-ac", "1"].map(String::from).to_vec()
+}
+
+/// Any audio Gemini sends → OGG/Opus, which Telegram shows as a voice note.
+fn to_voice_note(audio: &[u8], mime: &str) -> Result<Vec<u8>, String> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let mut ff = Command::new("ffmpeg")
+        .args(["-loglevel", "error", "-nostdin"])
+        .args(pcm_args(mime))
+        .args(["-i", "pipe:0", "-c:a", "libopus", "-b:a", "32k", "-ac", "1", "-f", "ogg", "pipe:1"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|_| {
+            "spoken replies with Gemini need ffmpeg (sudo apt install ffmpeg, or brew install ffmpeg)".to_string()
+        })?;
+    let mut stdin = ff.stdin.take().ok_or("ffmpeg: no stdin")?;
+    let input = audio.to_vec();
+    let feeder = std::thread::spawn(move || stdin.write_all(&input));
+    let out = ff.wait_with_output().map_err(|e| format!("ffmpeg: {e}"))?;
+    let _ = feeder.join();
+    if !out.status.success() || out.stdout.is_empty() {
+        return Err(format!("ffmpeg: {}", crate::util::one_line(&String::from_utf8_lossy(&out.stderr), 160)));
+    }
+    Ok(out.stdout)
+}
+
 fn endpoint(base: &str, path: &str) -> String {
     format!("{}/{path}", base.trim_end_matches('/'))
 }
 
 /// Speech to text. `audio` is what Telegram sends (OGG/Opus).
 pub fn transcribe(c: &VoiceCfg, audio: &[u8]) -> Result<String, String> {
+    if gemini(c) {
+        let text = gemini_transcribe(c, audio)?;
+        if text.is_empty() {
+            return Err("I couldn't make out any words in that voice message".into());
+        }
+        return Ok(text);
+    }
     if c.stt_url.trim().is_empty() {
-        return Err("I can't listen to voice messages yet: set [voice] stt_url in config.toml (any OpenAI-compatible \
-                    /audio/transcriptions endpoint, e.g. Groq or a local whisper server)"
-            .into());
+        return Err(
+            "I can't listen to voice messages yet: set [voice] provider = \"gemini\" or stt_url in config.toml \
+                    (any OpenAI-compatible /audio/transcriptions endpoint, e.g. Groq or a local whisper server)"
+                .into(),
+        );
     }
     let (ct, body) =
         multipart(&[("model", &c.stt_model), ("response_format", "json")], "file", "voice.ogg", "audio/ogg", audio);
@@ -118,6 +232,9 @@ pub fn transcribe(c: &VoiceCfg, audio: &[u8]) -> Result<String, String> {
 
 /// Text to speech as OGG/Opus (what Telegram shows as a voice note).
 pub fn speak(c: &VoiceCfg, text: &str) -> Result<Vec<u8>, String> {
+    if gemini(c) {
+        return gemini_speak(c, text);
+    }
     let body = serde_json::json!({ "model": c.tts_model, "voice": c.tts_voice, "input": speakable(text), "response_format": "opus" });
     let mut req = http().post(&endpoint(&c.tts_url, "audio/speech"));
     if let Some(k) = key(&c.tts_key_env) {
@@ -159,7 +276,7 @@ pub fn heard(chat: i64) {
 /// Should this reply also be spoken? Consumes the voice-note mark.
 pub fn should_speak(c: &VoiceCfg, chat: i64) -> bool {
     let was_voice = HEARD.lock().ok().and_then(|mut h| h.as_mut().map(|s| s.remove(&chat))).unwrap_or(false);
-    !c.tts_url.trim().is_empty() && (c.speak == "always" || (c.speak == "voice" && was_voice))
+    speaking(c) && (c.speak == "always" || (c.speak == "voice" && was_voice))
 }
 
 #[cfg(test)]
@@ -192,6 +309,18 @@ mod tests {
                 && b.contains("name=\"model\"\r\n\r\nm\r\n")
                 && b.contains("OGG\r\n--")
         );
+    }
+
+    #[test]
+    fn gemini_does_both_with_one_key() {
+        let c = VoiceCfg { provider: "gemini".into(), ..Default::default() };
+        assert!(listening(&c) && speaking(&c) && !listening(&VoiceCfg::default()));
+        assert_eq!(pick(&c.tts_model, "tts-1", "gemini-3.8-flash-lite-tts"), "gemini-3.8-flash-lite-tts");
+        assert_eq!(pick("gemini-2.5-flash-preview-tts", "tts-1", "x"), "gemini-2.5-flash-preview-tts");
+        assert_eq!(pcm_args("audio/L16;codec=pcm;rate=16000"), ["-f", "s16le", "-ar", "16000", "-ac", "1"]);
+        assert!(pcm_args("audio/wav").is_empty());
+        let none = VoiceCfg { key_env: "PAGURUS_TEST_NO_SUCH_KEY".into(), ..c };
+        assert!(transcribe(&none, b"x").unwrap_err().contains("PAGURUS_TEST_NO_SUCH_KEY"));
     }
 
     /// A fake OpenAI-compatible transcription server on localhost.

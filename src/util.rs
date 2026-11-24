@@ -273,7 +273,6 @@ pub fn release_memory() {
 }
 
 /// Decode standard base64 (padding optional); None on a bad character.
-#[cfg(feature = "browser")]
 pub fn unbase64(s: &str) -> Option<Vec<u8>> {
     let mut out = Vec::with_capacity(s.len() / 4 * 3);
     let (mut acc, mut bits) = (0u32, 0);

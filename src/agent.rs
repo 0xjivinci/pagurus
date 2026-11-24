@@ -1362,11 +1362,11 @@ fn about(cfg: &Config, home: &std::path::Path) -> String {
 /// answer instead of a guess in either direction.
 fn abilities(cfg: &Config, home: &std::path::Path) -> String {
     let v = &cfg.voice;
-    let voice = match (v.stt_url.is_empty(), v.tts_url.is_empty()) {
-        (true, _) => "off here: voice notes can't be understood until the user sets [voice] stt_url in config.toml (an OpenAI-compatible /audio/transcriptions endpoint such as Groq or a local whisper server)"
+    let voice = match (crate::voice::listening(v), crate::voice::speaking(v) && v.speak != "off") {
+        (false, _) => "off here: voice notes can't be understood until the user sets [voice] provider = \"gemini\" (their Gemini key) or stt_url (an OpenAI-compatible /audio/transcriptions endpoint such as Groq or a local whisper server) in config.toml"
             .to_string(),
-        (false, true) => "on: voice notes are transcribed and answered in text (spoken replies need [voice] tts_url)".to_string(),
-        (false, false) => "on: voice notes are transcribed, and voice notes get spoken replies".to_string(),
+        (true, false) => "on: voice notes are transcribed and answered in text (spoken replies need [voice] tts_url, or provider = \"gemini\")".to_string(),
+        (true, true) => "on: voice notes are transcribed, and voice notes get spoken replies (pagurus sends them; you just answer in text)".to_string(),
     };
     let peers = crate::peer::names(home);
     let listening = !cfg.peer.listen.is_empty();
@@ -1827,7 +1827,7 @@ pub(crate) mod tests {
         let home = std::env::temp_dir().join(format!("pagurus-about-{}", crate::util::new_id()));
         let mut cfg = crate::config::Config::default();
         let a = super::about(&cfg, &home);
-        assert!(a.contains("Voice: off here") && a.contains("sets [voice] stt_url"));
+        assert!(a.contains("Voice: off here") && a.contains("[voice] provider = \"gemini\""));
         assert!(
             a.contains("Swarm: you can pair")
                 && a.contains("no peers paired yet")
@@ -1838,6 +1838,8 @@ pub(crate) mod tests {
         cfg.peer.listen = "127.0.0.1:7717".into();
         let a = super::about(&cfg, &home);
         assert!(a.contains("Voice: on") && a.contains("accepts tasks from its peers"));
+        cfg.voice = crate::voice::VoiceCfg { provider: "gemini".into(), ..Default::default() };
+        assert!(super::about(&cfg, &home).contains("get spoken replies"));
     }
     #[test]
     fn failure_detection() {

@@ -23,7 +23,8 @@ you're most likely to touch:
 | `[peer] listen` · `url` · `name` · `max_tasks` · `timeout_minutes` | off · · hostname · 1 · 15 | swarm endpoint, see [Swarm](big-jobs.md#swarm-pagurus-on-several-devices) |
 | `[telegram] allowed_chat_ids` | | required: only these chats are answered |
 | `[[mcp]]` | | MCP servers, see [MCP](tools.md#mcp) |
-| `[voice] stt_url` · `tts_url` · `speak` | off · off · voice | voice notes: any OpenAI-compatible `/audio/transcriptions` and `/audio/speech` endpoint; keys via `stt_key_env` / `tts_key_env` |
+| `[voice] provider` · `tts_voice` | openai · alloy | `gemini`: voice notes are heard and answered by voice with one Gemini key (`key_env`, default `GEMINI_API_KEY`; voices such as Kore, Puck, Charon; needs `ffmpeg`) |
+| `[voice] stt_url` · `tts_url` · `speak` | off · off · voice | voice notes: any OpenAI-compatible `/audio/transcriptions` and `/audio/speech` endpoint; keys via `stt_key_env` / `tts_key_env`. `speak`: voice (answer voice notes by voice) · always · off |
 
 `pagurus doctor` checks the config, keys, budgets and memory use.
 

@@ -27,7 +27,7 @@ model, tokens, time, how full the context is and any yolo time left.
 | `/undo` · `/retry` | forget the last exchange · ask it again |
 | `/good` · `/bad <what was wrong>` | rate the last answer (a `/bad` makes it reflect on it at once) |
 | a photo (with a caption) | pagurus looks at it (needs a model that can see images) |
-| a voice note | transcribed and answered (needs `[voice] stt_url`); answered by voice too with `tts_url` |
+| a voice note | transcribed and answered, by voice too: `[voice] provider = "gemini"` does both with your Gemini key (spoken replies need `ffmpeg`), or set `stt_url` / `tts_url` for OpenAI-compatible audio endpoints |
 | `/rollback` · `/rollback <n>` | list file checkpoints · put back a file pagurus wrote or edited |
 | `/procs` · `/procs kill <n>` | background processes it started |
 | `/pin <fact>` · `/pins` · `/unpin <n>` | keep something in view for this conversation |

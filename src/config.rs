@@ -782,7 +782,13 @@ claim_timeout_minutes = 30       # a task whose worker went silent this long is 
 # url = "https://example.com/mcp"     # … or a Streamable HTTP endpoint
 # bearer_env = "EXAMPLE_MCP_TOKEN"    # env var holding the token (never the token itself)
 
-# Voice notes on Telegram (off unless set). Any OpenAI-compatible audio endpoint:
+# Voice notes on Telegram (off unless set). With a Gemini key, one line does both
+# (needs ffmpeg for the spoken replies):
+# [voice]
+# provider = "gemini"                          # key from GEMINI_API_KEY (key_env = "…" to change)
+# tts_voice = "Kore"                           # Gemini voices: Kore, Puck, Charon, Aoede, Fenrir…
+#
+# … or any OpenAI-compatible audio endpoint:
 # [voice]
 # stt_url = "https://api.groq.com/openai/v1"   # speech-to-text: <stt_url>/audio/transcriptions
 # stt_model = "whisper-large-v3-turbo"
