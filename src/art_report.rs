@@ -431,7 +431,7 @@ mod tests {
         let a =
             json!({ "pieces": ["KT1XaCf6gkjFnKg3QmPfn6gep53moMvjkj1E/1", "KT1XaCf6gkjFnKg3QmPfn6gep53moMvjkj1E/1"] });
         assert_eq!(choose(&a).unwrap().len(), 1, "duplicates are shown once");
-        assert!(choose(&json!({ "pieces": "voxel art" })).is_err());
+        assert!(choose(&json!({ "pieces": "pixel art" })).is_err());
         assert!(choose(&json!({})).is_err());
     }
 
@@ -494,9 +494,9 @@ mod tests {
             high: Some(1_500_000),
             image: Some("data:image/png;base64,AAAA".into()),
         };
-        let h = page("Voxel <report>", &[p]);
+        let h = page("Pixel <report>", &[p]);
         assert!(h.contains("&lt;b&gt;evil") && !h.contains("<b>evil"));
-        assert!(h.contains("A &amp; B") && h.contains("Voxel &lt;report&gt;"));
+        assert!(h.contains("A &amp; B") && h.contains("Pixel &lt;report&gt;"));
         assert!(h.contains("<img src=\"data:image/png;base64,AAAA\""));
         assert!(h.contains("1.5 ꜩ on 2026-11-20"));
         assert!(h.contains("image (png)"));

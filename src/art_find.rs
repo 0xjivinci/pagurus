@@ -357,7 +357,7 @@ pub fn style(tag: &str, days: u64, n: usize) -> Result<String, String> {
     Ok(out)
 }
 
-/// Spellings artists use for one style: voxel → voxel, voxels, voxelart.
+/// Spellings artists use for one style: pixel → pixel, pixels, pixelart.
 fn tag_variants(tag: &str) -> Vec<String> {
     let t = tag.to_lowercase();
     let stem =

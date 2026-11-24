@@ -19,7 +19,7 @@ valid 7 days, renewed automatically) and stores it in `~/.pagurus/env`. Your own
 - "Who collects my work?" (after telling it your address)
 - "How did my work sell this month, and what did I earn in royalties?"
 - "What's in my collection?" (your public tz… address)
-- "Find 10 voxel artists and make me a PDF of their best pieces with the stats"
+- "Find 10 pixel artists and make me a PDF of their best pieces with the stats"
 
 Two bundled skills guide it: `art-collector` and `art-artist`. It can also look at a piece's preview image (`look`) when your model can see images.
 
@@ -47,8 +47,8 @@ It is printed by Chromium, Chrome, Brave or Edge if one is installed; otherwise 
 
 ## Styles
 
-`style` ranks artists whose recent work carries a tag by different collectors. When few turn up (a niche like voxel),
-it widens the search: every spelling of the tag (voxel, voxels, voxelart…) and titles, any date, ranked by how many
+`style` ranks artists whose recent work carries a tag by different collectors. When few turn up (a niche like pixel),
+it widens the search: every spelling of the tag (pixel, pixels, pixelart…) and titles, any date, ranked by how many
 different people collected that work.
 
 ## Commands

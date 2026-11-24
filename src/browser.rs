@@ -655,7 +655,7 @@ mod tests {
         assert!(check_url("file:///etc/passwd").unwrap_err().contains("http"));
         assert!(check_url("javascript:alert(1)").is_err());
         assert!(check_url("http://169.254.169.254/latest/meta-data/").unwrap_err().contains("refused"));
-        assert!(check_url("http://127.0.0.1:8822/").is_ok(), "local services stay reachable, like web_fetch");
+        assert!(check_url("http://127.0.0.1:8080/").is_ok(), "local services stay reachable, like web_fetch");
     }
 
     #[test]
