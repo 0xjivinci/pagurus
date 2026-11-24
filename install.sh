@@ -3,7 +3,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/0xjivinci/pagurus/main/install.sh | sh              # smol
 #   curl -fsSL https://raw.githubusercontent.com/0xjivinci/pagurus/main/install.sh | sh -s -- --uge   # uge
 # smol is the small build for anything down to a Pi Zero; uge adds coding, a browser, a richer terminal, …
-# Options (environment): PAGURUS_VERSION=v0.1.1  PAGURUS_BIN_DIR=/usr/local/bin  PAGURUS_REPO=owner/name
+# Options (environment): PAGURUS_VERSION=v0.1.2  PAGURUS_BIN_DIR=/usr/local/bin  PAGURUS_REPO=owner/name
 #                        PAGURUS_BUILD=uge (same as --uge)
 set -eu
 REPO="${PAGURUS_REPO:-0xjivinci/pagurus}"
